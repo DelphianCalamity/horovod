@@ -51,6 +51,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
               momentum=None,
               gradient_clipping=False,
               quantum_num=256,
+              learning_rate=0.1,
               ):
     """Perform an allreduce on a tf.Tensor or tf.IndexedSlices.
 
@@ -87,6 +88,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["signum"] = Compression.signum
     comp_dict["adas"] = Compression.adas
     comp_dict["onebit"] = Compression.onebit
+    comp_dict["powersgd"] = Compression.powersgd
 
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
@@ -216,47 +218,68 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                     elemnum = elemnum.eval()
 
                 tensor = tf.reshape(tensor, [-1])
-                sign = compression.compress(tensor, shape, use_memory, momentum)
+
 
                 if comm_method == 'allgather':
-
+                    if use_memory:
+                        sign, mean = compression.compress(tensor, shape, use_memory, momentum, learning_rate)
+                        mean = tf.reshape(mean, [-1])
+                        mean_1d = allgather(mean)
+                    else:
+                        sign = compression.compress(tensor, shape, use_memory, momentum, learning_rate)
                     sign_1d = allgather(sign)
                     tensor_len = elemnum
                     summed_tensor = tf.Variable(tf.zeros_like(tensor))
 
-                    for i in range(size()):
-                        tensor_encoded = sign_1d[i * tensor_len:(i + 1) * tensor_len]
-                        tensor_encoded = tf.cast(tensor_encoded, dtype=tf.float32) * 2.0 - 1.0
-                        summed_tensor = tf.math.add(summed_tensor, tensor_encoded)
+                    if use_memory:
+                        for i in range(size()):
+                            tensor_encoded = sign_1d[i * tensor_len:(i + 1) * tensor_len]
+                            mean = mean_1d[i]
+                            tensor_decoded = tf.cast(tensor_encoded, dtype=tf.float32) * 2.0 - 1.0
+                            delta = mean * tensor_decoded
+                            summed_tensor = tf.math.add(summed_tensor, delta)
 
-                    summed_tensor_sign = tf.cast(tf.math.greater_equal(summed_tensor, 0), dtype=tensor.dtype)
+                        new_tensor = (tf.div(summed_tensor, horovod_size)
+                                      if average else summed_tensor)
+                        new_tensor = new_tensor / learning_rate
+                        new_tensor = tf.reshape(new_tensor, shape)
+                    else:
+                        for i in range(size()):
+                            tensor_encoded = sign_1d[i * tensor_len:(i + 1) * tensor_len]
+                            tensor_decoded = tf.cast(tensor_encoded, dtype=tf.float32) * 2.0 - 1.0
+                            summed_tensor = tf.math.add(summed_tensor, tensor_decoded)
 
-                    new_tensor = summed_tensor_sign * 2.0 - 1.0
-                    new_tensor = tf.reshape(new_tensor, shape)
+                        summed_tensor_sign = tf.cast(tf.math.greater_equal(summed_tensor, 0), dtype=tensor.dtype)
+
+                        new_tensor = summed_tensor_sign * 2.0 - 1.0
+                        new_tensor = tf.reshape(new_tensor, shape)
 
             elif compress_method == 'onebit':
                 compression = Compression.onebit
                 horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
-                with tf.Session():
-                    elemnum = elemnum.eval()
 
                 tensor = tf.reshape(tensor, [-1])
-                mask = compression.compress(tensor, size, threshold_val, use_memory)
+                quant_tensor, ctx = compression.compress(tensor, use_memory, horovod_size)
+                quantum_mid, lower = ctx
 
                 if comm_method == 'allgather':
 
-                    mask_1d = allgather(mask)
-                    tensor_len = elemnum
+                    quant_tensor_1d = allgather(quant_tensor)
+                    quantum_mid_1d = allgather(quantum_mid)
+                    lower_1d = allgather(lower)
+                    tensor_len = tf.size(tensor)
                     summed_tensor = tf.Variable(tf.zeros_like(tensor))
 
                     for i in range(size()):
-                        tensor_encoded = mask_1d[i * tensor_len:(i + 1) * tensor_len]
-                        tensor_encoded = tf.cast(tensor_encoded, dtype=tf.float32)
-                        summed_tensor = tf.math.add(summed_tensor, tensor_encoded)
+                        quant_tensorx = quant_tensor_1d[i * tensor_len:(i + 1) * tensor_len]
+                        quantum_midx = quantum_mid_1d[i]
+                        lowerx = lower_1d[i]
+                        tensor_decompress = compression.decompress(quant_tensorx, [quantum_midx,lowerx])
+                        summed_tensor = tf.math.add(summed_tensor, tensor_decompress)
 
-                    new_tensor = summed_tensor
+                    new_tensor = (tf.div(summed_tensor, horovod_size)
+                                  if average else summed_tensor)
                     new_tensor = tf.reshape(new_tensor, shape)
 
             elif compress_method == 'adas':
@@ -503,6 +526,16 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                     new_tensor = (tf.div(summed_tensor, horovod_size)
                                   if average else summed_tensor)
                     new_tensor = tf.reshape(new_tensor, shape)
+            elif compress_method == 'powersgd':
+                compression = Compression.powersgd
+                horovod_size = tf.cast(size(), dtype=tensor.dtype)
+                with tf.Session():
+                    tensor_rank = tf.rank(tensor).eval()
+                if tensor_rank == 1:
+                    new_tensor = _allreduce(tensor) / horovod_size
+                elif tensor_rank > 1:
+                    tensor_compressed = compression.compress(tensor, use_memory, horovod_size)
+                    new_tensor = tensor_compressed
         return new_tensor
 
 
@@ -565,6 +598,7 @@ class DistributedOptimizer(tf.train.Optimizer):
                    momentum=None,
                    gradient_clipping=False,
                    quantum_num=256,
+                   learning_rate=0.1,
                    ):
         """Construct a new DistributedOptimizer, which uses another optimizer
         under the hood for computing single-process gradient values and
@@ -611,6 +645,7 @@ class DistributedOptimizer(tf.train.Optimizer):
         self._momentum = momentum
         self._gradient_clipping = gradient_clipping
         self._quantum_num = quantum_num
+        self._learning_rate = learning_rate
         super(DistributedOptimizer, self).__init__(
             name=name, use_locking=use_locking)
 
@@ -642,7 +677,8 @@ class DistributedOptimizer(tf.train.Optimizer):
                                              use_memory = self._use_memory,
                                              momentum = self._momentum,
                                              gradient_clipping = self._gradient_clipping,
-                                             quantum_num=self._quantum_num,)
+                                             quantum_num=self._quantum_num,
+                                             learning_rate=self._learning_rate)
                         averaged_gradients.append((avg_grad, var))
                     else:
                         averaged_gradients.append((None, var))
