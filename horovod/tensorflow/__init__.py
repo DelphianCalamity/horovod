@@ -89,6 +89,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["adas"] = Compression.adas
     comp_dict["onebit"] = Compression.onebit
     comp_dict["powersgd"] = Compression.powersgd
+    comp_dict["8bit"] = Compression.u8bit
 
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
@@ -495,34 +496,6 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                         ap = bp
                         am = bm
 
-                    ## concatenate tensors, then allgather
-                    # plus_indices, plus_mean, minus_indices, minus_mean = compression.compress(tensor, compress_ratio)
-                    # plus_indices_size = tf.cast(tf.reshape(tf.size(plus_indices), [-1]),dtype=tf.float32)
-                    # minus_indices_size = tf.cast(tf.reshape(tf.size(minus_indices), [-1]),dtype=tf.float32)
-                    # indices_concat = tf.concat([plus_indices, minus_indices],axis=0)
-                    # others_concat = tf.concat([plus_mean, minus_mean, plus_indices_size, minus_indices_size],axis=0)
-                    # indices_concat_1d = allgather(indices_concat)
-                    # others_concat_1d = allgather(others_concat)
-                    # summed_tensor = tf.Variable(tf.zeros_like(tensor))
-                    # a = 0
-                    # for i in range(size()):
-                    #
-                    #     others_concatx = others_concat_1d[4*i:4*(i+1)]
-                    #     psize = tf.cast(others_concatx[2],dtype=tf.int32)
-                    #     msize = tf.cast(others_concatx[3],dtype=tf.int32)
-                    #     b = a + psize + msize
-                    #     indices_concatx = indices_concat_1d[a:b]
-                    #     plus_indicesx = indices_concatx[:psize]
-                    #     minus_indicesx = indices_concatx[psize:]
-                    #     plus_meanx = others_concatx[0]
-                    #     minus_meanx = others_concatx[1]
-                    #
-                    #     tensor_decompress = compression.decompress(tensor, shape, plus_indicesx, plus_meanx,
-                    #                                                minus_indicesx, minus_meanx)
-                    #     summed_tensor = tf.math.add(summed_tensor, tensor_decompress)
-                    #
-                    #     a = b
-
                     new_tensor = (tf.div(summed_tensor, horovod_size)
                                   if average else summed_tensor)
                     new_tensor = tf.reshape(new_tensor, shape)
@@ -536,6 +509,28 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 elif tensor_rank > 1:
                     tensor_compressed = compression.compress(tensor, use_memory, horovod_size)
                     new_tensor = tensor_compressed
+
+            elif compress_method == '8bit':
+                compression = Compression.u8bit
+                horovod_size = tf.cast(size(), dtype=tensor.dtype)
+                shape = tf.shape(tensor)
+                tensor = tf.reshape(tensor, [-1])
+                tensor_encoded, scaler = compression.compress(tensor, use_memory)
+
+                if comm_method == 'allgather':
+                    tensor_encoded_1d = allgather(tensor_encoded)
+                    scalers_1d = allgather(tf.reshape(scaler, [-1]))
+                    tensor_len = tf.size(tensor)
+                    summed_tensor = tf.zeros_like(tensor)
+
+                    for i in range(size()):
+                        scaler = scalers_1d[i]
+                        tensor_encoded = tensor_encoded_1d[i * tensor_len:(i + 1) * tensor_len]
+                        summed_tensor = tf.math.add(summed_tensor,
+                                                    compression.decompress(tensor_encoded, scaler))
+                    new_tensor = (tf.div(summed_tensor, horovod_size)
+                                  if average else summed_tensor)
+                    new_tensor = tf.reshape(new_tensor, shape)
         return new_tensor
 
 
