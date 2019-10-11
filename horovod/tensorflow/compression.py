@@ -59,6 +59,7 @@ class FP16Compressor(Compressor):
 class RandomkCompressor(Compressor):
     """Python libraries Based Compress by performing sparsification (i.e., sending a ratio of the actual tensor size."""
     residuals = {}
+    global_step = 0
 
     @staticmethod
     def compress(tensor, elemnum, shape, compress_ratio, use_memory):
@@ -71,12 +72,13 @@ class RandomkCompressor(Compressor):
             tensor = tf.math.add(tensor, RandomkCompressor.residuals[name])
 
         rand = random.Random()
-        global_step_tensor = tf.Variable(1, trainable=False, name='global_step')
-        with tf.Session() as sess:
-            sess.run(global_step_tensor.initializer)
-            global_step = tf.train.global_step(sess, global_step_tensor)
-            #
-        h = hash(tensor.name + str(global_step))
+        # global_step_tensor = tf.Variable(1, trainable=False, name='global_step')
+        # with tf.Session() as sess:
+        #     sess.run(global_step_tensor.initializer)
+        #     global_step = tf.train.global_step(sess, global_step_tensor)
+
+        h = hash(tensor.name + str(RandomkCompressor.global_step))
+        RandomkCompressor.global_step += 1
         rand.seed(h)
         var = rand.sample(xrange(elemnum), max(1, int(elemnum * compress_ratio)))
         var.sort()
@@ -183,19 +185,20 @@ class SignSGDCompressor(Compressor):
                 SignSGDCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
             tensor = lr * tensor + SignSGDCompressor.residuals[name]
             sign_encode = tf.math.greater_equal(tensor, 0)
-            sign_decode = tf.cast(sign_encode, dtype=tf.float32) * 2.0 - 1.0
             mean = tf.math.reduce_mean(tf.abs(tensor))
-            delta = mean * sign_decode
-            SignSGDCompressor.residuals[name] = tensor - delta
+            tensor_decompress = SignSGDCompressor.decompress(sign_encode, mean)
+            SignSGDCompressor.residuals[name] = tensor - tensor_decompress
             return sign_encode, mean
         else:
             sign_encode = tf.math.greater_equal(tensor, 0)
             return sign_encode
 
     @staticmethod
-    def decompress(tensor, scaler, shape):
+    def decompress(sign_encode, mean):
         """Decoding the signs to float format """
-        return tensor
+        sign_decode = tf.cast(sign_encode, dtype=tf.float32) * 2.0 - 1.0
+        tensor_decompress = mean * sign_decode
+        return tensor_decompress
 
 
 class SignumCompressor(Compressor):
@@ -219,19 +222,20 @@ class SignumCompressor(Compressor):
                 SignumCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
             tensor = lr * tensor + SignumCompressor.residuals[name]
             sign_encode = tf.math.greater_equal(tensor, 0)
-            sign_decode = tf.cast(sign_encode, dtype=tf.float32) *2.0 -1.0
             mean = tf.math.reduce_mean(tf.abs(tensor))
-            delta = mean * sign_decode
-            SignumCompressor.residuals[name] = tensor - delta
+            tensor_decompress = SignSGDCompressor.decompress(sign_encode, mean)
+            SignSGDCompressor.residuals[name] = tensor - tensor_decompress
             return sign_encode, mean
         else:
             sign_encode = tf.math.greater_equal(tensor, 0)
             return sign_encode
 
     @staticmethod
-    def decompress(tensor, scaler, shape):
+    def decompress(sign_encode, mean):
         """Decoding the signs to float format """
-        return tensor
+        sign_decode = tf.cast(sign_encode, dtype=tf.float32) * 2.0 - 1.0
+        tensor_decompress = mean * sign_decode
+        return tensor_decompress
 
 
 class OnebitCompressor(Compressor):
@@ -265,6 +269,7 @@ class OnebitCompressor(Compressor):
         num1 = tf.where(tf.math.greater(num1, 0), num1, tf.ones_like(num1))
         mean0 = _allreduce(sum0) / num0
         mean1 = _allreduce(sum1) / num1
+        # for allgather
         #mean0 = (sum0) / num0
         #mean1 = (sum1) / num1
 
@@ -273,15 +278,16 @@ class OnebitCompressor(Compressor):
         lower = newmean - radius
         upper = newmean + radius
         quantum_mid = (lower + upper) / 2.0
-        quant_tensor = tf.math.greater_equal(tensor, 0)
+        quant_tensor = tf.math.greater_equal(tensor, quantum_mid)
 
-        if use_memory:
-            new_tensor = tf.cast(quant_tensor, dtype=tf.float32)
-            dequant_tensor = new_tensor * quantum_mid + 0.5 * quantum_mid + lower
-            OnebitCompressor.residuals[name] = tensor - dequant_tensor
         quantum_mid = tf.reshape(quantum_mid, [-1])
         lower = tf.reshape(lower, [-1])
         ctx = [quantum_mid, lower]
+
+        if use_memory:
+            dequant_tensor = OnebitCompressor.decompress(quant_tensor, ctx)
+            OnebitCompressor.residuals[name] = tensor - dequant_tensor
+
         return quant_tensor, ctx
 
     @staticmethod
@@ -289,7 +295,9 @@ class OnebitCompressor(Compressor):
         """Decoding the signs to float format """
         quantum_mid, lower = ctx
         new_tensor = tf.cast(quant_tensor, dtype=tf.float32)
-        new_tensor = new_tensor * quantum_mid + 0.5 * quantum_mid + lower
+        #new_tensor = new_tensor * quantum_mid + 0.5 * quantum_mid + lower
+        new_tensor = new_tensor * 2 - 1
+        new_tensor = new_tensor * (quantum_mid - lower) + quantum_mid
         return new_tensor
 
 
@@ -802,6 +810,45 @@ class U8bitCompressor(Compressor):
         return tensor_decompress
 
 
+class NaturalCompressor(Compressor):
+    """Default no-op sparser."""
+
+    residuals = {}
+
+    @staticmethod
+    def compress(tensor, use_memory):
+
+        if use_memory:
+            name = tensor.name
+            if name not in NaturalCompressor.residuals:
+                NaturalCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
+            tensor += NaturalCompressor.residuals[name]
+
+        zeros = tf.zeros_like(tensor)
+        exponent = tf.math.log(tf.abs(tensor)) / tf.math.log(2.0)
+        h1 = tf.math.floor(tf.where(tf.math.abs(tensor) != 0, exponent, zeros))
+
+        h2 = tf.where(tf.math.abs(tensor) != 0, tf.math.pow(2.0, h1), zeros)
+        # extract probability
+        p = tf.where(h2 != 0, tf.abs(tensor) / h2 - 1, h2)
+        u = tf.floor(tf.random_uniform(tf.shape(p)) + p)
+        tensor_compressed = h1 + u
+        tensor_compressed = tf.cast(tensor_compressed, dtype=tf.int8)
+        sign = tf.cast(tf.sign(tensor), dtype=tf.int8)
+
+        if use_memory:
+            NaturalCompressor.residuals[name] = tensor - NaturalCompressor.decompress(tensor_compressed, sign)
+
+        return tensor_compressed, sign
+
+    @staticmethod
+    def decompress(tensor, sign):
+        tensor = tf.cast(tensor, dtype=tf.float32)
+        sign = tf.cast(sign, dtype=tf.float32)
+        tensor_decompressed = sign * tf.math.pow(2.0, tensor)
+        return tensor_decompressed
+
+
 class Compression(object):
     """Optional gradient compression algorithm used during allreduce."""
 
@@ -824,3 +871,4 @@ class Compression(object):
     onebit = OnebitCompressor
     powersgd = PowerSGDCompressor
     u8bit = U8bitCompressor
+    natural = NaturalCompressor
