@@ -2,6 +2,7 @@
 
 import tensorflow as tf
 import random, math
+from horovod.tensorflow.mpi_ops import _allreduce
 
 
 class Compressor(object):
