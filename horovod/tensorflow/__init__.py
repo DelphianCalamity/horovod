@@ -128,8 +128,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
                 tensor = tf.reshape(tensor, [-1])
-                with tf.Session():
-                    elemnum = elemnum.eval()
+                #with tf.Session():
+                #    elemnum = elemnum.eval()
+                elemnum = tensor.get_shape()[0]
                 tensor_compressed, indices = compression.compress(tensor, elemnum, shape, compress_ratio, use_memory)
                 if comm_method == 'allreduce':
 
@@ -169,9 +170,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
                 tensor = tf.reshape(tensor, [-1])
-                with tf.Session():
-                    elemnum = elemnum.eval()
-
+                #with tf.Session():
+                #    elemnum = elemnum.eval()
+                elemnum = tensor.get_shape()[0]
                 tensor_sparsed, indices = compression.compress(tensor, elemnum, compress_ratio, use_memory)
                 if comm_method == 'broadcast':
 
@@ -216,9 +217,10 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 horovod_size = tf.cast(size(), dtype=tensor.dtype)
                 elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
-                with tf.Session():
-                    elemnum = elemnum.eval()
+                #with tf.Session():
+                #    elemnum = elemnum.eval()
                 tensor = tf.reshape(tensor, [-1])
+                elemnum = tensor.get_shape()[0]
                 if comm_method == 'allreduce':
                     if use_memory:
                         sign, mean = compression.compress(tensor, shape, use_memory, momentum, learning_rate)
@@ -308,9 +310,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
                 tensor = tf.reshape(tensor, [-1])
-                with tf.Session():
-                    elemnum = elemnum.eval()
-
+                #with tf.Session():
+                #    elemnum = elemnum.eval()
+                elemnum = tensor.get_shape()[0]
                 tensor_sparsed, indices = compression.compress(tensor, elemnum, compress_ratio, use_memory)
                 if comm_method == 'allgather':
 
@@ -339,9 +341,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 horovod_size = tf.cast(size(), dtype=tensor.dtype)
                 elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
-                with tf.Session():
-                    elemnum = elemnum.eval()
-
+                #with tf.Session():
+                #    elemnum = elemnum.eval()
+                
                 tensor_encoded, scaler = compression.compress(tensor, shape, use_memory)
 
                 if comm_method == 'broadcast':
@@ -415,9 +417,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
                 tensor = tf.reshape(tensor, [-1])
-                with tf.Session():
-                    elemnum = elemnum.eval()
-
+                #with tf.Session():
+                #    elemnum = elemnum.eval()
+                elemnum = tensor.get_shape()[0]
                 tensor_sparsed, indices = compression.compress(tensor, elemnum, threshold_val, use_memory)
                 if comm_method == 'allgather':
 
@@ -447,10 +449,10 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 elemnum = tf.size(tensor)
                 shape = tf.shape(tensor)
                 tensor = tf.reshape(tensor, [-1])
-                with tf.Session(
-                        config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as sess:
-                    elemnum = elemnum.eval()
-
+                #with tf.Session(
+                #        config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as sess:
+                #    elemnum = elemnum.eval()
+                elemnum = tensor.get_shape()[0]
                 tensor_sparsed, indices = compression.compress(tensor, elemnum, compress_ratio, use_memory, momentum,
                                                                horovod_size, gradient_clipping)
                 if comm_method == 'allgather':
@@ -521,7 +523,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             elif compress_method == 'powersgd':
                 compression = Compression.powersgd
                 horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                with tf.Session():
+                #with tf.Session()
+                with tf.Session(
+                        config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as sess:
                     tensor_rank = tf.rank(tensor).eval()
                 if tensor_rank == 1:
                     new_tensor = _allreduce(tensor) / horovod_size
