@@ -615,8 +615,9 @@ class PowerSGDCompressor(Compressor):
     @staticmethod
     def compress(tensor, use_memory, horovod_size):
         def orthogonalize(matrix):
-            with tf.Session():
-                m = tf.shape(matrix)[1].eval()
+#             with tf.Session():
+#                 m = tf.shape(matrix)[1].eval()
+            m = matrix.get_shape().as_list()[1]
             step = 0
             global i
             i = 0
