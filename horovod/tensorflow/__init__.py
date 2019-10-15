@@ -42,17 +42,9 @@ import tensorflow as tf
 import math
 
 
-def allreduce(tensor, average=True, device_dense='', device_sparse='', compression=Compression.none,
-              compress_ratio=None,
-              threshold_val=None,
-              comm_method=None,
-              compress_method=None,
-              use_memory=None,
-              momentum=None,
-              gradient_clipping=False,
-              quantum_num=256,
-              learning_rate=0.1,
-              ):
+def allreduce(tensor, average=True, device_dense='', device_sparse='',
+                   compression=Compression.none, params = None,
+                   ):
     """Perform an allreduce on a tf.Tensor or tf.IndexedSlices.
 
     Arguments:
@@ -92,6 +84,36 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["8bit"] = Compression.u8bit
     comp_dict["natural"] = Compression.natural
 
+    default_params = {}
+    default_params["compress_method"] = 'none'
+    default_params["comm_method"] = 'allgather'
+    default_params["use_memory"] = False
+    default_params["compress_ratio"] = 0.3
+    default_params["threshold_val"] = 0.0001
+    default_params["momentum"] = 0.9
+    default_params["learning_rate"] = 0.1
+    default_params["quantum_num"] = 256
+    default_params["gradient_clipping"] = False
+    default_params["horovod_size"] = size()
+    default_params["compressor"] = comp_dict[default_params["compress_method"]]
+
+    for argument in default_params:
+        if argument not in params:
+            params[argument] = default_params[argument]
+
+    params["compressor"] = comp_dict[params["compress_method"]]
+    compress_method = params["compress_method"]
+    comm_method = params["comm_method"]
+    use_memory = params["use_memory"]
+    compress_ratio = params["compress_ratio"]
+    threshold_val = params["threshold_val"]
+    momentum = params["momentum"]
+    learning_rate = params["learning_rate"]
+    quantum_num = params["quantum_num"]
+    gradient_clipping = params["gradient_clipping"]
+    horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
+    compression = params["compressor"]
+
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
             # For IndexedSlices, do two allgathers intead of an allreduce.
@@ -106,384 +128,241 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                                 dense_shape=tensor.dense_shape)
     else:
         with tf.device(device_dense):
+            tensor_flatten = tf.reshape(tensor, [-1])
+            elemnum = tensor_flatten.get_shape().as_list()[0]
+            tensor_rank = len(tensor.get_shape().as_list())
+
             if (compress_method is None) or (compress_method == 'none'):
                 compression = Compression.none
                 horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                tensor_compressed, ctx = compression.compress(tensor)
+                tensor_compressed, ctx = compression.compress(tensor, params)
                 summed_tensor_compressed = _allreduce(tensor_compressed)
-                summed_tensor = compression.decompress(summed_tensor_compressed, ctx)
+                summed_tensor = compression.decompress(summed_tensor_compressed, ctx, params)
                 new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
             elif compress_method == 'fp16':
                 compression = Compression.fp16
                 horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                tensor_compressed, ctx = compression.compress(tensor)
+                tensor_compressed, ctx = compression.compress(tensor, params)
                 summed_tensor_compressed = _allreduce(tensor_compressed)
-                summed_tensor = compression.decompress(summed_tensor_compressed, ctx)
+                summed_tensor = compression.decompress(summed_tensor_compressed, ctx, params)
                 new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
             elif compress_method == 'randomk':
-                compression = Compression.randomk
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                #with tf.Session():
-                #    elemnum = elemnum.eval()
-                elemnum = tensor.get_shape().as_list()[0]
-                tensor_compressed, indices = compression.compress(tensor, elemnum, shape, compress_ratio, use_memory)
+                tensor_compressed, ctx = compression.compress(tensor, params)
                 if comm_method == 'allreduce':
-
                     summed_tensor_compressed = _allreduce(tensor_compressed)
-                    summed_tensor = compression.decompress(summed_tensor_compressed, elemnum, shape, indices)
+                    summed_tensor = compression.decompress(summed_tensor_compressed, ctx, params)
                     new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
-
 
                 elif comm_method == 'broadcast':
-
-                    bd_tensor_sparsed = {}
-
+                    bd_tensor_compressed = {}
                     for ranki in range(size()):
-                        bd_tensor_sparsed[str(ranki)] = broadcast(tensor_compressed, root_rank=ranki, name=None)
-
-                    summed_tensor_compressed = tf.math.add_n(list(bd_tensor_sparsed.values()))
-                    summed_tensor = compression.decompress(summed_tensor_compressed, elemnum, shape, indices)
+                        bd_tensor_compressed[ranki] = broadcast(tensor_compressed, root_rank=ranki, name=None)
+                    summed_tensor_compressed = tf.math.add_n(list(bd_tensor_compressed.values()))
+                    summed_tensor = compression.decompress(summed_tensor_compressed, ctx, params)
                     new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
-
                 elif comm_method == 'allgather':
-
                     tensor_compressed_1d = allgather(tensor_compressed)
-
                     tensor_len = max(1, int(elemnum * compress_ratio))
                     summed_tensor_compressed = tf.Variable(tf.zeros([tensor_len], dtype=tf.float32))
-
                     for i in range(size()):
                         summed_tensor_compressed += tensor_compressed_1d[i * tensor_len:(i + 1) * tensor_len]
-
-                    summed_tensor = compression.decompress(summed_tensor_compressed, elemnum, shape, indices)
+                    summed_tensor = compression.decompress(summed_tensor_compressed, ctx, params)
                     new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
             elif compress_method == 'topk':
-                compression = comp_dict[compress_method]
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                #with tf.Session():
-                #    elemnum = elemnum.eval()
-                elemnum = tensor.get_shape().as_list()[0]
-                tensor_sparsed, indices = compression.compress(tensor, elemnum, compress_ratio, use_memory)
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                indices, tensor_shape = ctx
                 if comm_method == 'broadcast':
-
                     bd_indices = {}
-                    bd_tensor_sparsed = {}
+                    bd_tensor_compressed = {}
                     bd_tensors = {}
-
                     for ranki in range(size()):
-                        bd_indices[str(ranki)] = broadcast(indices, root_rank=ranki, name=None)
-                        bd_tensor_sparsed[str(ranki)] = broadcast(tensor_sparsed, root_rank=ranki, name=None)
-                        zero_tensor = tf.Variable(tf.zeros([elemnum], dtype=tf.float32))
-                        bd_tensors[str(ranki)] = tf.scatter_update(zero_tensor, bd_indices[str(ranki)],
-                                                                   bd_tensor_sparsed[str(ranki)])
+                        bd_indices[ranki] = broadcast(indices, root_rank=ranki, name=None)
+                        bd_tensor_compressed[ranki] = broadcast(tensor_compressed, root_rank=ranki, name=None)
+                        tensor_compressed_i = bd_tensor_compressed[ranki]
+                        ctx_i = bd_indices[ranki], tensor_shape
+                        bd_tensors[ranki] = compression.decompress(tensor_compressed_i, ctx_i, params)
 
                     summed_tensor = tf.math.add_n(list(bd_tensors.values()))
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
-
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
                 elif comm_method == 'allgather':
-
-                    tensor_sparsed_1d = allgather(tensor_sparsed)
+                    tensor_compressed_1d = allgather(tensor_compressed)
                     indices_1d = allgather(indices)
                     tensor_len = max(1, int(elemnum * compress_ratio))
                     summed_tensor = tf.zeros_like(tensor)
-
                     for i in range(size()):
-                        # if i is not local_rank:
-                        zero_tensor = tf.Variable(
-                            tf.zeros_like(tensor))  # tf.Variable(tf.zeros_like(tf.reshape(tensor, [-1])))
-                        index = indices_1d[i * tensor_len:(i + 1) * tensor_len]
-                        summed_tensor = tf.math.add(summed_tensor, tf.scatter_update(zero_tensor, index,
-                                                        tensor_sparsed_1d[i * tensor_len:(i + 1) * tensor_len]))
-
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
-
-            elif compress_method in ['signsgd', 'signum']:
-                compression = comp_dict[compress_method]
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
-                shape = tf.shape(tensor)
-                #with tf.Session():
-                #    elemnum = elemnum.eval()
-                tensor = tf.reshape(tensor, [-1])
-                elemnum = tensor.get_shape().as_list()[0]
-                if comm_method == 'allreduce':
-                    if use_memory:
-                        sign, mean = compression.compress(tensor, shape, use_memory, momentum, learning_rate)
-                        sign_decode = tf.cast(sign, dtype=tf.float16) * 2.0 - 1.0
-                        tensor_decompress = mean * sign_decode
-                        summed_tensor = _allreduce(tensor_decompress)
-                        new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
-                        new_tensor = new_tensor / learning_rate
-                        new_tensor = tf.reshape(new_tensor, shape)
-                    else:
-                        sign = compression.compress(tensor, shape, use_memory, momentum, learning_rate)
-                        sign = tf.cast(sign, dtype=tf.float16) * 2 - 1
-                        summed_tensor = tf.cast(_allreduce(sign), dtype=tf.float32)
-                        summed_tensor_sign = tf.cast(tf.math.greater_equal(summed_tensor, 0), dtype=tf.float32)
-                        new_tensor = summed_tensor_sign * 2.0 - 1.0
-                        new_tensor = tf.reshape(new_tensor, shape)
-
-                elif comm_method == 'allgather':
-                    if use_memory:
-                        sign, mean = compression.compress(tensor, shape, use_memory, momentum, learning_rate)
-                        mean = tf.reshape(mean, [-1])
-                        mean_1d = allgather(mean)
-                        sign_1d = allgather(sign)
-                        tensor_len = elemnum
-                        summed_tensor = tf.Variable(tf.zeros_like(tensor))
-                        for i in range(size()):
-                            sign = sign_1d[i * tensor_len:(i + 1) * tensor_len]
-                            mean = mean_1d[i]
-                            tensor_decompress = compression.decompress(sign, mean)
-                            summed_tensor = tf.math.add(summed_tensor, tensor_decompress)
-                        new_tensor = tf.div(summed_tensor, horovod_size) if average else summed_tensor
-                        new_tensor = new_tensor / learning_rate
-                        new_tensor = tf.reshape(new_tensor, shape)
-                    else:
-                        sign = compression.compress(tensor, shape, use_memory, momentum, learning_rate)
-                        sign_1d = allgather(sign)
-                        tensor_len = elemnum
-                        summed_tensor = tf.Variable(tf.zeros_like(tensor))
-                        for i in range(size()):
-                            tensor_encoded = sign_1d[i * tensor_len:(i + 1) * tensor_len]
-                            tensor_decoded = tf.cast(tensor_encoded, dtype=tf.float32) * 2.0 - 1.0
-                            summed_tensor = tf.math.add(summed_tensor, tensor_decoded)
-                        summed_tensor_sign = tf.cast(tf.math.greater_equal(summed_tensor, 0), dtype=tensor.dtype)
-                        new_tensor = summed_tensor_sign * 2.0 - 1.0
-                        new_tensor = tf.reshape(new_tensor, shape)
-
-            elif compress_method == 'onebit':
-                compression = Compression.onebit
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                shape = tf.shape(tensor)
-
-                tensor = tf.reshape(tensor, [-1])
-                quant_tensor, ctx = compression.compress(tensor, use_memory, horovod_size)
-                quantum_mid, lower = ctx
-
-                if comm_method == 'allgather':
-
-                    quant_tensor_1d = allgather(quant_tensor)
-                    quantum_mid_1d = allgather(quantum_mid)
-                    lower_1d = allgather(lower)
-                    tensor_len = tf.size(tensor)
-                    summed_tensor = tf.Variable(tf.zeros_like(tensor))
-
-                    for i in range(size()):
-                        quant_tensor = quant_tensor_1d[i * tensor_len:(i + 1) * tensor_len]
-                        quantum_mid = quantum_mid_1d[i]
-                        lower = lower_1d[i]
-                        ctx = [quantum_mid,lower]
-                        tensor_decompress = compression.decompress(quant_tensor, ctx)
-                        summed_tensor = tf.math.add(summed_tensor, tensor_decompress)
-
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
-
-                elif comm_method == 'allreduce':
-                    quant_tensor = tf.cast(quant_tensor, dtype=tf.float16)
-                    quant_tensor = quant_tensor * 2 - 1
-                    summed_tensor_compressed = tf.cast(_allreduce(quant_tensor), dtype=tf.float32)
-                    summed_tensor = summed_tensor_compressed * (quantum_mid - lower) + quantum_mid
+                        indices_i = indices_1d[i * tensor_len:(i + 1) * tensor_len]
+                        ctx_i = indices_i, tensor_shape
+                        tensor_compressed_i = tensor_compressed_1d[i * tensor_len:(i + 1) * tensor_len]
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
                     new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
-                    new_tensor = tf.reshape(new_tensor, shape)
 
-            elif compress_method == 'adas':
-                compression = comp_dict[compress_method]
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                #with tf.Session():
-                #    elemnum = elemnum.eval()
-                elemnum = tensor.get_shape().as_list()[0]
-                tensor_sparsed, indices = compression.compress(tensor, elemnum, compress_ratio, use_memory)
+            elif compress_method == 'threshold':
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                indices, tensor_shape = ctx
                 if comm_method == 'allgather':
-
                     index_size = tf.reshape(tf.size(indices), [-1])
-
-                    tensor_sparsed_1d = allgather(tensor_sparsed)
+                    tensor_compressed_1d = allgather(tensor_compressed)
                     indices_1d = allgather(indices)
                     indices_size_1d = allgather(index_size)
 
-                    summed_tensor = tf.Variable(tf.zeros_like(tensor))
+                    summed_tensor = tf.zeros_like(tensor)
                     a = 0
                     for i in range(size()):
                         b = a + indices_size_1d[i]
-                        zero_tensor = tf.Variable(tf.zeros_like(tensor))
-                        index = indices_1d[a:b]
-                        summed_tensor = tf.math.add(summed_tensor,
-                                                    tf.scatter_update(zero_tensor, index, tensor_sparsed_1d[a:b]))
+                        indices_i = indices_1d[a:b]
+                        tensor_compressed_i = tensor_compressed_1d[a:b]
+                        ctx_i = indices_i, tensor_shape
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
                         a = b
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
+            elif compress_method in ['signsgd', 'signum']:
+                tensor_compressed, ctx = compression.compress(tensor, params)
 
-            elif compress_method == 'terngrad':
-                compression = Compression.terngrad
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
-                shape = tf.shape(tensor)
-                #with tf.Session():
-                #    elemnum = elemnum.eval()
-                
-                tensor_encoded, scaler = compression.compress(tensor, shape, use_memory)
-
-                if comm_method == 'broadcast':
-
-                    bd_scalers = {}
-                    bd_tensor_encoded = {}
-                    bd_tensor_decoded = {}
-                    for ranki in range(size()):
-                        bd_scalers[str(ranki)] = broadcast(scaler, root_rank=ranki, name=None)
-                        bd_tensor_encoded[str(ranki)] = broadcast(tensor_encoded, root_rank=ranki, name=None)
-                        bd_tensor_decoded[str(ranki)] = compression.decompress(bd_tensor_encoded[str(ranki)],
-                                                                               bd_scalers[str(ranki)], shape)
-                    summed_tensor = tf.math.add_n(list(bd_tensor_decoded.values()))
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
-
+                if comm_method == 'allreduce':
+                    tensor_decompress = compression.decompress(tensor_compressed, ctx, params)
+                    tensor_decompress = tf.cast(tensor_decompress, dtype=tf.float16)
+                    summed_tensor = _allreduce(tensor_decompress)
+                    summed_tensor = tf.cast(summed_tensor, dtype=tf.float32)
+                    if use_memory:
+                        # do average and learning rate adjustment
+                        new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
+                        new_tensor = new_tensor / learning_rate
+                    else:
+                        # do majority vote
+                        summed_tensor_sign = tf.cast(tf.math.greater_equal(summed_tensor, 0), dtype=tf.float32)
+                        new_tensor = summed_tensor_sign * 2.0 - 1.0
 
                 elif comm_method == 'allgather':
+                    sign = tensor_compressed
+                    mean, tensor_shape = ctx
+                    mean = tf.reshape(mean, [-1])
+                    mean_1d = allgather(mean) if use_memory else None
+                    sign_1d = allgather(sign)
+                    tensor_len = elemnum
+                    summed_tensor = tf.zeros_like(tensor)
+                    for i in range(size()):
+                        tensor_compressed_i = sign_1d[i * tensor_len:(i + 1) * tensor_len]
+                        mean_i = mean_1d[i] if use_memory else None
+                        ctx_i = mean_i, tensor_shape
+                        tensor_decompress = compression.decompress(tensor_compressed_i, ctx_i, params)
+                        summed_tensor += tensor_decompress
+                    if use_memory:
+                        # do average and learning rate adjustment
+                        new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
+                        new_tensor = new_tensor / learning_rate
+                    else:
+                        # do majority vote
+                        summed_tensor_sign = tf.cast(tf.math.greater_equal(summed_tensor, 0), dtype=tf.float32)
+                        new_tensor = summed_tensor_sign * 2.0 - 1.0
 
-                    # scaler = tf.convert_to_tensor(1.0) #for testing signSGD
-                    scaler_shape = tf.shape(scaler)
-                    tensor_encoded_1d = allgather(tensor_encoded)
+            elif compress_method == 'qsgd':
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                norm, tensor_shape = ctx
+                if comm_method == 'broadcast':
+                    bd_tensor_compressed = {}
+                    bd_tensors = {}
+                    bd_norm = {}
+                    for ranki in range(size()):
+                        bd_norm[ranki] = broadcast(norm, root_rank=ranki, name=None)
+                        bd_tensor_compressed[ranki] = broadcast(tensor_compressed, root_rank=ranki, name=None)
+                        tensor_compressed_i = bd_tensor_compressed[ranki]
+                        ctx_i = bd_norm[ranki], tensor_shape
+                        bd_tensors[ranki] = compression.decompress(tensor_compressed_i, ctx_i, params)
+                    summed_tensor = tf.math.add_n(list(bd_tensors.values()))
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
+
+                elif comm_method == 'allgather':
+                    tensor_compressed_1d = allgather(tensor_compressed)
+                    norm_1d = allgather(norm)
+                    bits = int(math.log(quantum_num, 2) + 1)
+                    tensor_len = bits + 1
+                    summed_tensor = tf.zeros_like(tensor)
+                    for i in range(size()):
+                        norm_i = norm_1d[i]
+                        tensor_compressed_i = tensor_compressed_1d[i * tensor_len : (i + 1) * tensor_len]
+                        ctx_i = norm_i, tensor_shape
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
+
+            elif compress_method == 'onebit':
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                quantum_mid, lower, tensor_shape = ctx
+                if comm_method == 'allgather':
+                    tensor_compressed_1d = allgather(tensor_compressed)
+                    quantum_mid_1d = allgather(quantum_mid)
+                    lower_1d = allgather(lower)
+                    tensor_len = elemnum
+                    summed_tensor = tf.zeros_like(tensor)
+                    for i in range(size()):
+                        tensor_compressed_i = tensor_compressed_1d[i * tensor_len:(i + 1) * tensor_len]
+                        ctx_i = quantum_mid_1d[i], lower_1d[i], tensor_shape
+                        tensor_decompress = compression.decompress(tensor_compressed_i, ctx_i, params)
+                        summed_tensor +=  tensor_decompress
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
+
+                elif comm_method == 'allreduce':
+                    tensor_decompress = compression.decompress(tensor_compressed, ctx, params)
+                    tensor_decompress = tf.cast(tensor_decompress, dtype=tf.float16)
+                    summed_tensor = _allreduce(tensor_decompress)
+                    summed_tensor = tf.cast(summed_tensor, dtype=tf.float32)
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
+
+            elif compress_method == 'terngrad':
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                scaler, tensor_shape = ctx
+                if comm_method == 'broadcast':
+                    bd_scalers = {}
+                    bd_tensor_compressed = {}
+                    bd_tensors = {}
+                    for ranki in range(size()):
+                        bd_scalers[ranki] = broadcast(scaler, root_rank=ranki, name=None)
+                        bd_tensor_compressed[ranki] = broadcast(tensor_compressed, root_rank=ranki, name=None)
+                        tensor_compressed_i = bd_tensor_compressed[ranki]
+                        ctx_i = bd_scalers[ranki], tensor_shape
+                        bd_tensors[ranki] = compression.decompress(tensor_compressed_i, ctx_i, params)
+                    summed_tensor = tf.math.add_n(list(bd_tensors.values()))
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
+
+                elif comm_method == 'allgather':
+                    tensor_compressed_1d = allgather(tensor_compressed)
                     scalers_1d = allgather(tf.reshape(scaler, [-1]))
                     tensor_len = elemnum // 4 + 1
                     summed_tensor = tf.zeros_like(tensor)
-
                     for i in range(size()):
-                        scaler = tf.reshape(scalers_1d[i:(i + 1)], scaler_shape)
-                        tensor_encoded = tensor_encoded_1d[i * tensor_len:(i + 1) * tensor_len]
-                        summed_tensor = tf.math.add(summed_tensor,
-                                                    compression.decompress(tensor_encoded, scaler, shape))
-
-                    # summed_tensor = tf.sign(summed_tensor) #for testing signSGD
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
-
-            elif compress_method == 'qsgd':
-                compression = Compression.qsgd
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                encode_tensor = compression.compress(tensor, shape, quantum_num, use_memory)
-                if comm_method == 'broadcast':
-                    bd_encode_tensor = {}
-                    bd_tensor_decoded = {}
-                    for ranki in range(size()):
-                        bd_encode_tensor[str(ranki)] = broadcast(encode_tensor, root_rank=ranki, name=None)
-                        bd_tensor_decoded[str(ranki)] = compression.decompress(tensor, bd_encode_tensor[str(ranki)], quantum_num)
-                    summed_tensor = tf.math.add_n(list(bd_tensor_decoded.values()))
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
-
-                elif comm_method == 'allgather':
-
-                    encode_tensor_1d = allgather(encode_tensor)
-                    bits = int(math.log(quantum_num, 2) + 1)
-                    length = bits + 1
-                    summed_tensor = tf.zeros_like(tensor)
-                    for i in range(size()):
-                        encode_tensorx = encode_tensor_1d[i * length:(i + 1) * length]
-                        summed_tensor = summed_tensor + compression.decompress(tensor, encode_tensorx, quantum_num)
-                    new_tensor = (tf.div(summed_tensor, horovod_size) if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
-
-            elif compress_method == 'threshold':
-                compression = Compression.threshold
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                #with tf.Session():
-                #    elemnum = elemnum.eval()
-                elemnum = tensor.get_shape().as_list()[0]
-                tensor_sparsed, indices = compression.compress(tensor, elemnum, threshold_val, use_memory)
-                if comm_method == 'allgather':
-
-                    index_size = tf.reshape(tf.size(indices), [-1])
-
-                    tensor_sparsed_1d = allgather(tensor_sparsed)
-                    indices_1d = allgather(indices)
-                    indices_size_1d = allgather(index_size)
-
-                    summed_tensor = tf.Variable(tf.zeros_like(tensor))
-                    a = 0
-                    for i in range(size()):
-                        b = a + indices_size_1d[i]
-                        zero_tensor = tf.Variable(tf.zeros_like(tensor))
-                        index = indices_1d[a:b]
-                        summed_tensor = tf.math.add(summed_tensor,
-                                                    tf.scatter_update(zero_tensor, index, tensor_sparsed_1d[a:b]))
-                        a = b
-
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
+                        ctx_i = scalers_1d[i], tensor_shape
+                        tensor_compressed_i = tensor_compressed_1d[i * tensor_len:(i + 1) * tensor_len]
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
             elif compress_method == 'dgc':  # dgc is deep gradient compression
-                compression = Compression.dgc
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                elemnum = tf.size(tensor)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                #with tf.Session(
-                #        config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as sess:
-                #    elemnum = elemnum.eval()
-                elemnum = tensor.get_shape().as_list()[0]
-                tensor_sparsed, indices = compression.compress(tensor, elemnum, compress_ratio, use_memory, momentum,
-                                                               horovod_size, gradient_clipping)
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                indices, tensor_shape = ctx
                 if comm_method == 'allgather':
-
                     index_size = tf.reshape(tf.size(indices), [-1])
-
-                    tensor_sparsed_1d = allgather(tensor_sparsed)
+                    tensor_compressed_1d = allgather(tensor_compressed)
                     indices_1d = allgather(indices)
                     indices_size_1d = allgather(index_size)
 
-                    summed_tensor = tf.Variable(tf.zeros_like(tensor))
+                    summed_tensor = tf.zeros_like(tensor)
                     a = 0
                     for i in range(size()):
                         b = a + indices_size_1d[i]
-                        zero_tensor = tf.Variable(tf.zeros_like(tensor))
-                        index = indices_1d[a:b]
-                        summed_tensor = tf.math.add(summed_tensor,
-                                                    tf.scatter_update(zero_tensor, index, tensor_sparsed_1d[a:b]))
+                        indices_i = indices_1d[a:b]
+                        tensor_compressed_i = tensor_compressed_1d[a:b]
+                        ctx_i = indices_i, tensor_shape
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
                         a = b
-
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
             elif compress_method == 'adaq':  # adaq is adaptive quantization
-                compression = Compression.adaq
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                plus_indices, plus_mean, minus_indices, minus_mean = compression.compress(tensor, compress_ratio,
-                                                                                          use_memory)
+                _, ctx = compression.compress(tensor, params)
+                plus_indices, plus_mean, minus_indices, minus_mean = ctx
                 if comm_method == 'allgather':
 
                     plus_indices_size = tf.reshape(tf.size(plus_indices), [-1])
@@ -497,84 +376,104 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                     minus_mean_1d = allgather(minus_mean)
                     minus_indices_size_1d = allgather(minus_indices_size)
 
-                    summed_tensor = tf.Variable(tf.zeros_like(tensor))
-                    ap = 0
-                    am = 0
+                    summed_tensor = tf.zeros_like(tensor)
+                    ap, am = 0, 0
                     for i in range(size()):
                         bp = ap + plus_indices_size_1d[i]
                         bm = am + minus_indices_size_1d[i]
 
-                        plus_meanx = plus_mean_1d[i]
-                        minus_meanx = minus_mean_1d[i]
+                        plus_mean_i = plus_mean_1d[i]
+                        minus_mean_i = minus_mean_1d[i]
+                        plus_indices_i = plus_indices_1d[ap:bp]
+                        minus_indices_i = minus_indices_1d[am:bm]
 
-                        plus_indicesx = plus_indices_1d[ap:bp]
-                        minus_indicesx = minus_indices_1d[am:bm]
+                        ctx_i = plus_indices_i, plus_mean_i, minus_indices_i, minus_mean_i
+                        tensor_decompress = compression.decompress(tensor, ctx_i, params)
+                        summed_tensor += tensor_decompress
+                        ap, am = bp, bm
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
-                        tensor_decompress = compression.decompress(tensor, shape, plus_indicesx, plus_meanx,
-                                                                   minus_indicesx, minus_meanx)
-                        summed_tensor = tf.math.add(summed_tensor, tensor_decompress)
+            elif compress_method == 'adas':
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                indices, tensor_shape = ctx
+                if comm_method == 'allgather':
+                    index_size = tf.reshape(tf.size(indices), [-1])
+                    tensor_compressed_1d = allgather(tensor_compressed)
+                    indices_1d = allgather(indices)
+                    indices_size_1d = allgather(index_size)
 
-                        ap = bp
-                        am = bm
+                    summed_tensor = tf.zeros_like(tensor)
+                    a = 0
+                    for i in range(size()):
+                        b = a + indices_size_1d[i]
+                        indices_i = indices_1d[a:b]
+                        tensor_compressed_i = tensor_compressed_1d[a:b]
+                        ctx_i = indices_i, tensor_shape
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
+                        a = b
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
             elif compress_method == 'powersgd':
-                compression = Compression.powersgd
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                #with tf.Session()
-#                 with tf.Session(
-#                         config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as sess:
-#                     tensor_rank = tf.rank(tensor).eval()
-                tensor_rank = len(tensor.get_shape().as_list())
                 if tensor_rank == 1:
                     new_tensor = _allreduce(tensor) / horovod_size
                 elif tensor_rank > 1:
-                    tensor_compressed = compression.compress(tensor, use_memory, horovod_size)
-                    new_tensor = tensor_compressed
+                    _, ctx = compression.compress(tensor, params)
+                    new_tensor = compression.decompress(tensor, ctx, params)
 
             elif compress_method == '8bit':
-                compression = Compression.u8bit
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                tensor_encoded, scaler = compression.compress(tensor, use_memory)
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                scaler, tensor_shape = ctx
+                if comm_method == 'broadcast':
+                    bd_scalers = {}
+                    bd_tensor_compressed = {}
+                    bd_tensors = {}
+                    for ranki in range(size()):
+                        bd_scalers[ranki] = broadcast(scaler, root_rank=ranki, name=None)
+                        bd_tensor_compressed[ranki] = broadcast(tensor_compressed, root_rank=ranki, name=None)
+                        tensor_compressed_i = bd_tensor_compressed[ranki]
+                        ctx_i = bd_scalers[ranki], tensor_shape
+                        bd_tensors[ranki] = compression.decompress(tensor_compressed_i, ctx_i, params)
+                    summed_tensor = tf.math.add_n(list(bd_tensors.values()))
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
-                if comm_method == 'allgather':
-                    tensor_encoded_1d = allgather(tensor_encoded)
-                    scalers_1d = allgather(tf.reshape(scaler, [-1]))
-                    tensor_len = tf.size(tensor)
+                elif comm_method == 'allgather':
+                    tensor_compressed_1d = allgather(tensor_compressed)
+                    scalers_1d = allgather(scaler)
+                    tensor_len = elemnum
                     summed_tensor = tf.zeros_like(tensor)
-
                     for i in range(size()):
-                        scaler = scalers_1d[i]
-                        tensor_encoded = tensor_encoded_1d[i * tensor_len:(i + 1) * tensor_len]
-                        summed_tensor = tf.math.add(summed_tensor,
-                                                    compression.decompress(tensor_encoded, scaler))
-                    new_tensor = (tf.div(summed_tensor, horovod_size)
-                                  if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
+                        ctx_i = scalers_1d[i], tensor_shape
+                        tensor_compressed_i = tensor_compressed_1d[i * tensor_len:(i + 1) * tensor_len]
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
             elif compress_method == 'natural':
-                compression = Compression.natural
-                horovod_size = tf.cast(size(), dtype=tensor.dtype)
-                shape = tf.shape(tensor)
-                tensor = tf.reshape(tensor, [-1])
-                tensor_sparsed,sign = compression.compress(tensor, use_memory)
+                tensor_compressed, ctx = compression.compress(tensor, params)
+                sign, tensor_shape = ctx
+                if comm_method == 'broadcast':
+                    bd_sign = {}
+                    bd_tensor_compressed = {}
+                    bd_tensors = {}
+                    for ranki in range(size()):
+                        bd_sign[ranki] = broadcast(sign, root_rank=ranki, name=None)
+                        bd_tensor_compressed[ranki] = broadcast(tensor_compressed, root_rank=ranki, name=None)
+                        tensor_compressed_i = bd_tensor_compressed[ranki]
+                        ctx_i = bd_sign[ranki], tensor_shape
+                        bd_tensors[ranki] = compression.decompress(tensor_compressed_i, ctx_i, params)
+                    summed_tensor = tf.math.add_n(list(bd_tensors.values()))
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
-                if comm_method == 'allgather':
-                    tensor_sparsed_1d = allgather(tensor_sparsed)
-                    sign_1d = allgather(sign)
+                elif comm_method == 'allgather':
+                    tensor_compressed_1d = allgather(tensor_compressed)
+                    sign_1d = allgather(tf.reshape(sign, [-1]))
+                    tensor_len = elemnum
                     summed_tensor = tf.zeros_like(tensor)
-                    tensor_len = tf.size(tensor)
                     for i in range(size()):
-                        tensor_sparsed = tensor_sparsed_1d[i * tensor_len:(i + 1) * tensor_len]
-                        sign = sign_1d[i * tensor_len:(i + 1) * tensor_len]
-                        tensor_decompressed = compression.decompress(tensor_sparsed, sign)
-                        summed_tensor += tensor_decompressed
-                    new_tensor = (tf.div(summed_tensor, horovod_size) if average else summed_tensor)
-                    new_tensor = tf.reshape(new_tensor, shape)
+                        sign_i = sign_1d[i * tensor_len:(i + 1) * tensor_len]
+                        ctx_i = sign_i, tensor_shape
+                        tensor_compressed_i = tensor_compressed_1d[i * tensor_len:(i + 1) * tensor_len]
+                        summed_tensor += compression.decompress(tensor_compressed_i, ctx_i, params)
+                    new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
         return new_tensor
 
 
@@ -629,15 +528,7 @@ class DistributedOptimizer(tf.train.Optimizer):
 
     def __init__(self, optimizer, name=None, use_locking=False, device_dense='',
                  device_sparse='', compression=Compression.none, sparse_as_dense=False,
-                   compress_ratio=None,
-                   threshold_val=None,
-                   comm_method=None,
-                   compress_method=None,
-                   use_memory=None,
-                   momentum=None,
-                   gradient_clipping=False,
-                   quantum_num=256,
-                   learning_rate=0.1,
+                   params=None,
                    ):
         """Construct a new DistributedOptimizer, which uses another optimizer
         under the hood for computing single-process gradient values and
@@ -676,15 +567,7 @@ class DistributedOptimizer(tf.train.Optimizer):
         self._device_sparse = device_sparse
         self._compression = compression
         self._sparse_as_dense = sparse_as_dense
-        self._compress_ratio = compress_ratio
-        self._threshold_val = threshold_val
-        self._comm_method = comm_method
-        self._compress_method = compress_method
-        self._use_memory = use_memory
-        self._momentum = momentum
-        self._gradient_clipping = gradient_clipping
-        self._quantum_num = quantum_num
-        self._learning_rate = learning_rate
+        self._params = params
         super(DistributedOptimizer, self).__init__(
             name=name, use_locking=use_locking)
 
@@ -709,15 +592,7 @@ class DistributedOptimizer(tf.train.Optimizer):
                                              device_dense=self._device_dense,
                                              device_sparse=self._device_sparse,
                                              compression=self._compression,
-                                             compress_ratio = self._compress_ratio,
-                                             threshold_val = self._threshold_val,
-                                             comm_method = self._comm_method,
-                                             compress_method = self._compress_method,
-                                             use_memory = self._use_memory,
-                                             momentum = self._momentum,
-                                             gradient_clipping = self._gradient_clipping,
-                                             quantum_num=self._quantum_num,
-                                             learning_rate=self._learning_rate)
+                                             params = self._params,)
                         averaged_gradients.append((avg_grad, var))
                     else:
                         averaged_gradients.append((None, var))

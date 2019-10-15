@@ -4,17 +4,16 @@ import tensorflow as tf
 import random, math
 from horovod.tensorflow.mpi_ops import _allreduce
 
-
 class Compressor(object):
     """Interface for compressing and decompressing a given tensor."""
 
     @staticmethod
-    def compress(tensor):
+    def compress(tensor, params):
         """Compresses a tensor and returns it with the context needed to decompress it."""
         pass
 
     @staticmethod
-    def decompress(tensor, ctx):
+    def decompress(tensor, ctx, params):
         """Decompress the tensor with the given context."""
         pass
 
@@ -23,12 +22,12 @@ class NoneCompressor(Compressor):
     """Default no-op compression."""
 
     @staticmethod
-    def compress(tensor):
+    def compress(tensor, params):
         """Returns the tensor unmodified."""
         return tensor, None
 
     @staticmethod
-    def decompress(tensor, ctx):
+    def decompress(tensor, ctx, params):
         """Returns the tensor unmodified."""
         return tensor
 
@@ -37,7 +36,7 @@ class FP16Compressor(Compressor):
     """Compress all floating point gradients to 16-bit."""
 
     @staticmethod
-    def compress(tensor):
+    def compress(tensor, params):
         """Downcasts the tensor to 16-bit."""
         tensor_compressed = tensor
 
@@ -47,7 +46,7 @@ class FP16Compressor(Compressor):
         return tensor_compressed, tensor.dtype
 
     @staticmethod
-    def decompress(tensor, ctx):
+    def decompress(tensor, ctx, params):
         """Upcasts the tensor to the initialization dtype."""
 
         tensor_decompressed = tensor
@@ -63,335 +62,229 @@ class RandomkCompressor(Compressor):
     global_step = 0
 
     @staticmethod
-    def compress(tensor, elemnum, shape, compress_ratio, use_memory):
+    def compress(tensor, params):
         """Use Python Random libraries RNG to compress by generating a list of indices to be transmitted."""
 
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in RandomkCompressor.residuals:
-                RandomkCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, RandomkCompressor.residuals[name])
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
 
         rand = random.Random()
-        # global_step_tensor = tf.Variable(1, trainable=False, name='global_step')
-        # with tf.Session() as sess:
-        #     sess.run(global_step_tensor.initializer)
-        #     global_step = tf.train.global_step(sess, global_step_tensor)
-
         h = hash(tensor.name + str(RandomkCompressor.global_step))
         RandomkCompressor.global_step += 1
         rand.seed(h)
         var = rand.sample(xrange(elemnum), max(1, int(elemnum * compress_ratio)))
-        var.sort()
+        # var.sort()
         indices = tf.convert_to_tensor(var, dtype=tf.int32)
-
-        tensor_sparsed = tf.reshape(tensor, [-1])
-        tensor_sparsed = tf.gather(tensor_sparsed, indices)
+        tensor_compressed = tf.gather(tensor_flatten, indices)
+        ctx = indices, tensor_shape
 
         if use_memory:
-            residual_mask = tf.Variable(tf.ones_like(tensor, dtype=tensor.dtype))
-            zero_tensor = tf.zeros_like(indices, dtype=tensor.dtype)
-            residual_mask = tf.scatter_update(residual_mask, indices, zero_tensor)
-            RandomkCompressor.residuals[name] = tensor * residual_mask
-
-        return tensor_sparsed, indices
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, elemnum, shape, indices):
+    def decompress(tensor_compressed, ctx, params):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
-
-        tensor_decompressed = tensor
-        zero_tensor = tf.Variable(tf.zeros([elemnum], dtype=tf.float32))
-        tensor_decompressed = tf.scatter_update(zero_tensor, indices, tensor_decompressed)
-        tensor_decompressed = tf.reshape(tensor_decompressed, shape)
+        indices, tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tf.scatter_update(zero_tensor, indices, tensor_compressed)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
 
 class TopKCompressor(Compressor):
-    """Default no-op sparser."""
 
     residuals = {}
 
     @staticmethod
-    def compress(tensor, size, compress_ratio, use_memory):
+    def compress(tensor, params):
 
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in TopKCompressor.residuals:
-                TopKCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, TopKCompressor.residuals[name])
-        # with tf.device('/device:GPU:0'):
-        k = max(1, int(size * compress_ratio))
-        _, indices = tf.math.top_k(tf.math.abs(tensor), k)
-        vals = tf.gather(tensor, indices)
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
+
+        k = max(1, int(elemnum * compress_ratio))
+        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k)
+        tensor_compressed = tf.gather(tensor_flatten, indices)
+        ctx = indices, tensor_shape
 
         if use_memory:
-            residual_mask = tf.Variable(tf.ones_like(tensor, dtype=tensor.dtype))
-            zero_tensor = tf.zeros_like(indices, dtype=tensor.dtype)
-            residual_mask = tf.scatter_update(residual_mask, indices, zero_tensor)
-            TopKCompressor.residuals[name] = tensor * residual_mask
-        return vals, indices
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, ctx):
-
-        return tensor
+    def decompress(tensor_compressed, ctx, params):
+        """Decompress by filling empty slots with zeros and reshape back using the original shape"""
+        indices, tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tf.scatter_update(zero_tensor, indices, tensor_compressed)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 
 class ThresholdCompressor(Compressor):
-    """Default no-op sparser."""
 
     residuals = {}
 
     @staticmethod
-    def compress(tensor, size, threshold_val, use_memory):
-
-        # with tf.device('/device:GPU:0'):
+    def compress(tensor, params):
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in ThresholdCompressor.residuals:
-                ThresholdCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, ThresholdCompressor.residuals[name])
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
 
-        thr_mask = tf.math.greater_equal(tf.math.abs(tensor), threshold_val)
-        vals = tf.boolean_mask(tensor, thr_mask)
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        threshold_val = params["threshold_val"]
+        thr_mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), threshold_val)
+        tensor_compressed = tf.boolean_mask(tensor_flatten, thr_mask)
         indices = tf.reshape(tf.where(thr_mask), [-1])
+        ctx = indices, tensor_shape
 
         if use_memory:
-            residual_mask = tf.Variable(tf.ones_like(tensor, dtype=tensor.dtype))
-            zero_tensor = tf.zeros_like(indices, dtype=tensor.dtype)
-            residual_mask = tf.scatter_update(residual_mask, indices, zero_tensor)
-            ThresholdCompressor.residuals[name] = tensor * residual_mask
-
-        return vals, indices
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, ctx):
-
-        return tensor
+    def decompress(tensor_compressed, ctx, params):
+        indices, tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tf.scatter_update(zero_tensor, indices, tensor_compressed)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 
 class SignSGDCompressor(Compressor):
-    """Default no-op sparser."""
+
     residuals = {}
 
     @staticmethod
-    def compress(tensor, shape, use_memory, momentum, lr):
+    def compress(tensor, params):
 
-        """Encoding and compressing the signs """
-
+        use_memory = params["use_memory"]
+        lr = params["learning_rate"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in SignSGDCompressor.residuals:
-                SignSGDCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = lr * tensor + SignSGDCompressor.residuals[name]
-            sign_encode = tf.math.greater_equal(tensor, 0)
-            mean = tf.math.reduce_mean(tf.abs(tensor))
-            tensor_decompress = SignSGDCompressor.decompress(sign_encode, mean)
-            SignSGDCompressor.residuals[name] = tensor - tensor_decompress
-            return sign_encode, mean
-        else:
-            sign_encode = tf.math.greater_equal(tensor, 0)
-            return sign_encode
+            if name in compressor.residuals:
+                tensor = lr * tensor + compressor.residuals[name]
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        tensor_compressed = tf.math.greater_equal(tensor_flatten, 0)
+        mean = tf.math.reduce_mean(tf.abs(tensor_flatten)) if use_memory else None
+        ctx = mean, tensor_shape
+        if use_memory:
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(sign_encode, mean):
-        """Decoding the signs to float format """
+    def decompress(sign_encode, ctx, params):
+
+        mean, tensor_shape = ctx
         sign_decode = tf.cast(sign_encode, dtype=tf.float32) * 2.0 - 1.0
-        tensor_decompress = mean * sign_decode
-        return tensor_decompress
+        use_memory = params["use_memory"]
+        sign_decode = mean * sign_decode if use_memory else sign_decode
+        tensor_decompressed = tf.reshape(sign_decode, tensor_shape)
+        return tensor_decompressed
 
 
 class SignumCompressor(Compressor):
-    """Default no-op sparser."""
+
     residuals = {}
-    memory = {}
+    momentum = {}
 
     @staticmethod
-    def compress(tensor, shape, use_memory, momentum, lr):
+    def compress(tensor, params):
 
-        """Encoding and compressing the signs """
+        use_memory = params["use_memory"]
+        lr = params["learning_rate"]
+        compressor = params["compressor"]
+        if use_memory:
+            name = tensor.name
+            if name in compressor.residuals:
+                tensor = lr * tensor + compressor.residuals[name]
         # update tensor by momentum
+        momentum = params["momentum"]
         name = tensor.name
-        if name not in SignumCompressor.memory:
-            SignumCompressor.memory[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-        tensor = (1.0 - momentum) * tensor + momentum * SignumCompressor.memory[name]
-        SignumCompressor.memory[name] = tensor
+        if name in compressor.momentum:
+            tensor = (1.0 - momentum) * tensor + momentum * compressor.momentum[name]
+        compressor.momentum[name] = tensor
 
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        tensor_compressed = tf.math.greater_equal(tensor_flatten, 0)
+        mean = tf.math.reduce_mean(tf.abs(tensor_flatten)) if use_memory else None
+        ctx = mean, tensor_shape
         if use_memory:
-            if name not in SignumCompressor.residuals:
-                SignumCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = lr * tensor + SignumCompressor.residuals[name]
-            sign_encode = tf.math.greater_equal(tensor, 0)
-            mean = tf.math.reduce_mean(tf.abs(tensor))
-            tensor_decompress = SignSGDCompressor.decompress(sign_encode, mean)
-            SignSGDCompressor.residuals[name] = tensor - tensor_decompress
-            return sign_encode, mean
-        else:
-            sign_encode = tf.math.greater_equal(tensor, 0)
-            return sign_encode
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(sign_encode, mean):
-        """Decoding the signs to float format """
+    def decompress(sign_encode, ctx, params):
+
+        mean, tensor_shape = ctx
         sign_decode = tf.cast(sign_encode, dtype=tf.float32) * 2.0 - 1.0
-        tensor_decompress = mean * sign_decode
-        return tensor_decompress
-
-
-class OnebitCompressor(Compressor):
-    """Default no-op sparser."""
-    residuals = {}
-
-    @staticmethod
-    def compress(tensor, use_memory, horovod_size):
-
-        """Encoding and compressing the signs """
-
-        if use_memory:
-            name = tensor.name
-            if name not in OnebitCompressor.residuals:
-                OnebitCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, OnebitCompressor.residuals[name])
-
-        abs_tensor = tensor
-        mean = tf.math.reduce_mean(abs_tensor)
-        mean = _allreduce(mean) / horovod_size
-
-        mask0 = tf.math.less(abs_tensor, mean)
-        sum0 = tf.math.reduce_sum(tf.boolean_mask(tensor, mask0))
-        num0 = tf.math.reduce_sum(tf.cast(mask0, dtype=tf.float32))
-        mask1 = tf.math.greater_equal(abs_tensor, mean)
-        sum1 = tf.math.reduce_sum(tf.boolean_mask(tensor, mask1))
-        num1 = tf.math.reduce_sum(tf.cast(mask1, dtype=tf.float32))
-        num0 = _allreduce(num0)
-        num1 = _allreduce(num1)
-        num0 = tf.where(tf.math.greater(num0, 0), num0, tf.ones_like(num0))
-        num1 = tf.where(tf.math.greater(num1, 0), num1, tf.ones_like(num1))
-        mean0 = _allreduce(sum0) / num0
-        mean1 = _allreduce(sum1) / num1
-        # for allgather
-        #mean0 = (sum0) / num0
-        #mean1 = (sum1) / num1
-
-        newmean = (mean0 + mean1) * 0.5
-        radius = (mean1 - newmean) * 2.0
-        lower = newmean - radius
-        upper = newmean + radius
-        quantum_mid = (lower + upper) / 2.0
-        quant_tensor = tf.math.greater_equal(tensor, quantum_mid)
-
-        quantum_mid = tf.reshape(quantum_mid, [-1])
-        lower = tf.reshape(lower, [-1])
-        ctx = [quantum_mid, lower]
-
-        if use_memory:
-            dequant_tensor = OnebitCompressor.decompress(quant_tensor, ctx)
-            OnebitCompressor.residuals[name] = tensor - dequant_tensor
-
-        return quant_tensor, ctx
-
-    @staticmethod
-    def decompress(quant_tensor, ctx):
-        """Decoding the signs to float format """
-        quantum_mid, lower = ctx
-        new_tensor = tf.cast(quant_tensor, dtype=tf.float32)
-        #new_tensor = new_tensor * quantum_mid + 0.5 * quantum_mid + lower
-        new_tensor = new_tensor * 2 - 1
-        new_tensor = new_tensor * (quantum_mid - lower) + quantum_mid
-        return new_tensor
-
-
-class TerngradCompressor(Compressor):
-    """Default no-op sparser."""
-    residuals = {}
-
-    @staticmethod
-    def compress(tensor, shape, use_memory):
-
-        """Encoding and compressing the signs """
-
-        if use_memory:
-            name = tensor.name
-            if name not in TerngradCompressor.residuals:
-                TerngradCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, TerngradCompressor.residuals[name])
-
-        std = tf.math.square(tensor - tf.math.reduce_mean(tensor))
-        std = tf.math.sqrt(tf.math.reduce_mean(std))
-        c = 2.5
-        gradient = tf.clip_by_value(tensor, -c * std, c * std)
-        scaler = tf.math.reduce_max(tf.math.abs(gradient))
-        zeros = tf.zeros(shape)
-        abs_gradient = tf.abs(gradient)
-        sign_gradient = tf.sign(gradient)
-        rnd_sample = tf.random_uniform(shape, 0, scaler)
-        where_cond = tf.less(rnd_sample, abs_gradient)
-        binarized_gradient = tf.where(where_cond, sign_gradient * scaler, zeros)
-
-        new_sign = tf.sign(binarized_gradient)  # -1, 0, 1
-        a = tf.add(new_sign, 1)  # shift -1,0,1 to 0,1,2 (2'b00,2'b01,2'b10)
-        a = tf.reshape(a, [-1])
-        pad_size = 4 - tf.mod(tf.size(a), 4)
-        pad = tf.range(0.0, pad_size)
-        a = tf.concat([a, pad], 0)
-        a_split1, a_split2, a_split3, a_split4 = tf.split(a, 4)  # assume the size is dividable by 4
-
-        # encode 4 grads into 1 Byte
-        sum_1 = tf.add(a_split1, a_split2 * 4)
-        sum_2 = tf.add(a_split3 * 16, a_split4 * 64)
-        sum_all = tf.add(sum_1, sum_2)
-        encoded = tf.cast(sum_all, tf.uint8)
-
-        if use_memory:
-            TerngradCompressor.residuals[name] = tensor - binarized_gradient
-        return encoded, scaler
-
-    @staticmethod
-    def decompress(encoded_data, scaler, shape):
-        """Decoding the signs to float format """
-        a = tf.cast(encoded_data, tf.int32)
-        a_split1 = tf.mod(a, 4)
-        a_split2 = tf.to_int32(tf.mod(a / 4, 4))
-        a_split3 = tf.to_int32(tf.mod(a / 16, 4))
-        a_split4 = tf.to_int32(tf.mod(a / 64, 4))
-        a = tf.concat([a_split1, a_split2, a_split3, a_split4], 0)
-        real_size = tf.reduce_prod(shape)
-        a = tf.to_float(a)
-        a = tf.gather(a, tf.range(0, real_size))
-
-        a = tf.reshape(a, shape)
-        a = tf.subtract(a, 1)
-        decoded = a * scaler
-        return decoded
+        use_memory = params["use_memory"]
+        sign_decode = mean * sign_decode if use_memory else sign_decode
+        tensor_decompressed = tf.reshape(sign_decode, tensor_shape)
+        return tensor_decompressed
 
 
 class QsgdCompressor(Compressor):
-    """Default no-op sparser."""
+
     residuals = {}
 
     @staticmethod
-    def compress(tensor, shape, quantum_num, use_memory):
+    def compress(tensor, params):
 
-        """Encoding and compressing the signs """
-
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in QsgdCompressor.residuals:
-                QsgdCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, QsgdCompressor.residuals[name])
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
 
-        norm = tf.norm(tensor)
-        abs_gradient = tf.abs(tensor)
+        quantum_num = params["quantum_num"]
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        norm = tf.reshape(tf.norm(tensor_flatten), [-1])
+        abs_gradient = tf.abs(tensor_flatten)
         bits = tf.cast(math.log(quantum_num, 2) + 1, dtype=tf.int32)
         qnum = tf.cast(quantum_num, dtype=tf.float32)
 
         level_float = qnum / norm * abs_gradient
         previous_level = tf.math.floor(level_float)
-        prob = tf.random.uniform(tf.shape(tensor))
+        prob = tf.random.uniform(tf.shape(tensor_flatten))
         is_next_level = tf.cast(tf.math.less(prob, (level_float - previous_level)), tf.float32)
         new_level = tf.cast(previous_level + is_next_level, tf.int32)
-
 
         def cond(step, input_tensor, output):
             return step < bits
@@ -411,18 +304,23 @@ class QsgdCompressor(Compressor):
         sign = tf.reshape(tf.greater_equal(tensor, 0), [1, tf.size(tensor)])
         encode_output = tf.concat([sign, encode_output], 0)
 
+        tensor_compressed = encode_output
+        ctx = norm, tensor_shape
+
         if use_memory:
-            new_tensor = norm / qnum * tf.to_float(new_level) * tf.sign(tensor)
-            QsgdCompressor.residuals[name] = tensor - new_tensor
-        return encode_output
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, encode_output, quantum_num):
-        """Decoding the signs to float format """
+    def decompress(encode_output, ctx, params):
 
-        norm = tf.norm(tensor)
+        quantum_num = params["quantum_num"]
+        norm, tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
         bits = tf.cast(math.log(quantum_num, 2) + 1, dtype=tf.int32)
         qnum = tf.cast(quantum_num, dtype=tf.float32)
+
         def cond(step, input_tensor, output):
             return step < bits
 
@@ -435,74 +333,224 @@ class QsgdCompressor(Compressor):
         encode_output = tf.cast(encode_output, dtype=tf.int32)
         sign = encode_output[0, :] * 2 - 1
         input_tensor = encode_output[1:, :]
-        output = tf.zeros_like(tensor, dtype=tf.int32)
+        output = tf.zeros([tensor_size], dtype=tf.int32)
         step = tf.constant(0)
         _, _, decode_output = tf.while_loop(cond, decode, loop_vars=[step, input_tensor, output])
 
         decode_output = sign * decode_output
         decode_output = tf.cast(decode_output, dtype=tf.float32)
-        gradient = norm / qnum * decode_output
-        return gradient
+        tensor_decompressed = norm / qnum * decode_output
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
+
+
+class OnebitCompressor(Compressor):
+
+    residuals = {}
+
+    @staticmethod
+    def compress(tensor, params):
+
+        horovod_size = params["horovod_size"]
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
+        if use_memory:
+            name = tensor.name
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        mean = tf.math.reduce_mean(tensor_flatten)
+        mean = _allreduce(mean) / horovod_size
+
+        mask0 = tf.math.less(tensor_flatten, mean)
+        sum0 = tf.math.reduce_sum(tf.boolean_mask(tensor_flatten, mask0))
+        num0 = tf.math.reduce_sum(tf.cast(mask0, dtype=tf.float32))
+        mask1 = tf.math.greater_equal(tensor_flatten, mean)
+        sum1 = tf.math.reduce_sum(tf.boolean_mask(tensor_flatten, mask1))
+        num1 = tf.math.reduce_sum(tf.cast(mask1, dtype=tf.float32))
+        num0 = _allreduce(num0)
+        num1 = _allreduce(num1)
+        num0 = tf.where(tf.math.greater(num0, 0), num0, tf.ones_like(num0))
+        num1 = tf.where(tf.math.greater(num1, 0), num1, tf.ones_like(num1))
+        mean0 = _allreduce(sum0) / num0
+        mean1 = _allreduce(sum1) / num1
+        # for allgather
+        # mean0 = (sum0) / num0
+        # mean1 = (sum1) / num1
+
+        newmean = (mean0 + mean1) * 0.5
+        radius = (mean1 - newmean) * 2.0
+        lower = newmean - radius
+        upper = newmean + radius
+        quantum_mid = (lower + upper) / 2.0
+        tensor_compressed = tf.math.greater_equal(tensor_flatten, quantum_mid)
+
+        quantum_mid = tf.reshape(quantum_mid, [-1])
+        lower = tf.reshape(lower, [-1])
+        ctx = quantum_mid, lower, tensor_shape
+
+        if use_memory:
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+
+        comm_method = params["comm_method"]
+        quantum_mid, lower, tensor_shape = ctx
+        new_tensor = tf.cast(tensor_compressed, dtype=tf.float32)
+        # new_tensor = new_tensor * quantum_mid + 0.5 * quantum_mid + lower
+        new_tensor = new_tensor * 2 - 1
+        tensor_decompressed = new_tensor * (quantum_mid - lower) + quantum_mid
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
+
+
+class TerngradCompressor(Compressor):
+    residuals = {}
+
+    @staticmethod
+    def compress(tensor, params):
+
+        """Encoding and compressing the signs """
+
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
+        if use_memory:
+            name = tensor.name
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+
+        std = tf.math.square(tensor_flatten - tf.math.reduce_mean(tensor_flatten))
+        std = tf.math.sqrt(tf.math.reduce_mean(std))
+        c = 2.5
+        gradient = tf.clip_by_value(tensor_flatten, -c * std, c * std)
+        scaler = tf.math.reduce_max(tf.math.abs(gradient))
+        zeros = tf.zeros(tf.shape(tensor_flatten))
+        abs_gradient = tf.abs(gradient)
+        sign_gradient = tf.sign(gradient)
+        rnd_sample = tf.random_uniform(tf.shape(tensor_flatten), 0, scaler)
+        where_cond = tf.less(rnd_sample, abs_gradient)
+        binarized_gradient = tf.where(where_cond, sign_gradient * scaler, zeros)
+
+        new_sign = tf.sign(binarized_gradient)  # -1, 0, 1
+        a = tf.add(new_sign, 1)  # shift -1,0,1 to 0,1,2 (2'b00,2'b01,2'b10)
+        a = tf.reshape(a, [-1])
+        pad_size = 4 - tf.mod(tf.size(a), 4)
+        pad = tf.range(0.0, pad_size)
+        a = tf.concat([a, pad], 0)
+        a_split1, a_split2, a_split3, a_split4 = tf.split(a, 4)  # assume the size is dividable by 4
+
+        # encode 4 grads into 1 Byte
+        sum_1 = tf.add(a_split1, a_split2 * 4)
+        sum_2 = tf.add(a_split3 * 16, a_split4 * 64)
+        sum_all = tf.add(sum_1, sum_2)
+
+        tensor_compressed = tf.cast(sum_all, tf.uint8)
+        scaler = tf.reshape(scaler, [-1])
+        ctx = scaler, tensor_shape
+        if use_memory:
+            tensor_decompressed = tf.reshape(binarized_gradient, tensor_shape)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+        """Decoding the signs to float format """
+        scaler, tensor_shape = ctx
+        a = tf.cast(tensor_compressed, tf.int32)
+        a_split1 = tf.mod(a, 4)
+        a_split2 = tf.to_int32(tf.mod(a / 4, 4))
+        a_split3 = tf.to_int32(tf.mod(a / 16, 4))
+        a_split4 = tf.to_int32(tf.mod(a / 64, 4))
+        a = tf.concat([a_split1, a_split2, a_split3, a_split4], 0)
+        real_size = tf.reduce_prod(tensor_shape)
+        a = tf.to_float(a)
+        a = tf.gather(a, tf.range(0, real_size))
+
+        a = tf.reshape(a, tensor_shape)
+        a = tf.subtract(a, 1)
+        tensor_decompressed = a * scaler
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 
 class DgcCompressor(Compressor):
-    """Default no-op sparser."""
 
     residuals = {}
     gradients = {}
 
     @staticmethod
-    def compress(tensor, size, compress_ratio, use_memory, momentum, horovod_size, gradient_clipping):
-
-        # use_memory is inherently integrated in the algorithm, no need to handle it
-        # with tf.device(device_dense):#tf.device('/device:GPU:0'):
+    def compress(tensor, params):
+        horovod_size = params["horovod_size"]
+        compress_ratio = params["compress_ratio"]
+        momentum = params["momentum"]
+        gradient_clipping = params["gradient_clipping"]
         name = tensor.name
-        if name not in DgcCompressor.residuals:
-            DgcCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-        if name not in DgcCompressor.gradients:
-            DgcCompressor.gradients[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
+        compressor = params["compressor"]
 
         if gradient_clipping:
             tensor_squ_sum = tf.math.reduce_sum(tf.math.square(tensor))
             thr_global = tf.math.sqrt(_allreduce(tensor_squ_sum))
-            clipping_val = thr_global / tf.math.sqrt(horovod_size)
+            clipping_val = thr_global / tf.math.sqrt(float(horovod_size))
             tensor = tf.clip_by_value(tensor, -clipping_val, clipping_val)
 
-        DgcCompressor.residuals[name] = momentum * DgcCompressor.residuals[name] + tensor
-        DgcCompressor.gradients[name] += DgcCompressor.residuals[name]
+        if name in compressor.residuals:
+            compressor.residuals[name] = momentum * compressor.residuals[name] + tensor
+        else:
+            compressor.residuals[name] = tf.zeros_like(tf.reshape(tensor, [-1]))
+        if name in compressor.gradients:
+            compressor.gradients[name] += compressor.residuals[name]
+        else:
+            compressor.gradients[name] = tf.zeros_like(tf.reshape(tensor, [-1]))
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
 
-        sample_shape = tf.reshape(tf.convert_to_tensor(max(1, int(size * 0.1)), dtype=tf.int32), [-1])
-        sample_index = tf.random.uniform(sample_shape, minval=0, maxval=size, dtype=tf.int32)
-        sample_tensor = tf.gather(DgcCompressor.gradients[name], sample_index)
+        sample_shape = tf.reshape(tf.convert_to_tensor(max(1, int(elemnum * 0.1)), dtype=tf.int32), [-1])
+        sample_index = tf.random.uniform(sample_shape, minval=0, maxval=elemnum, dtype=tf.int32)
+        sample_tensor = tf.gather(compressor.gradients[name], sample_index)
 
-        k = max(1, int(size * compress_ratio * 0.1))
+        k = max(1, int(elemnum * compress_ratio * 0.1))
         vals, indices = tf.math.top_k(tf.math.abs(sample_tensor), k)
         thr = tf.math.reduce_min(vals)
 
-        mask = tf.math.greater_equal(tf.math.abs(tensor), thr)
+        mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
 
-        vals = tf.boolean_mask(tensor, mask)
+        tensor_compressed = tf.boolean_mask(tensor_flatten, mask)
         indices = tf.reshape(tf.where(mask), [-1])
+        ctx = indices, tensor_shape
 
         not_mask = tf.math.logical_not(mask)
-        DgcCompressor.residuals[name] = DgcCompressor.residuals[name] * tf.cast(not_mask, dtype=tf.float32)
-        DgcCompressor.gradients[name] = DgcCompressor.gradients[name] * tf.cast(not_mask, dtype=tf.float32)
+        compressor.residuals[name] = compressor.residuals[name] * tf.cast(not_mask, dtype=tf.float32)
+        compressor.gradients[name] = compressor.gradients[name] * tf.cast(not_mask, dtype=tf.float32)
 
-        return vals, indices
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, ctx):
-
-        return tensor
+    def decompress(tensor_compressed, ctx, params):
+        indices, tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tf.scatter_update(zero_tensor, indices, tensor_compressed)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 
 class AdaqCompressor(Compressor):
-    """Default no-op sparser."""
 
     residuals = {}
 
     @staticmethod
-    def compress(tensor, compress_ratio, use_memory):
+    def compress(tensor, params):
+        use_memory = params["use_memory"]
+        compress_ratio = params["compress_ratio"]
 
         def quan(tensor, tensor_mask, compress_ratio):
             # tensor_mask = tf.math.greater_equal(tf.math.abs(tensor),0) # for testing and debuging
@@ -525,54 +573,60 @@ class AdaqCompressor(Compressor):
 
             return indices, mean, mask
 
-        # with tf.device('/device:GPU:0'):
-
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in AdaqCompressor.residuals:
-                AdaqCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, AdaqCompressor.residuals[name])
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
 
-        plus_tensor = tf.math.greater(tensor, 0)
-        minus_tensor = tf.math.less(tensor, 0)
-        plus_indices, plus_mean, plus_mask = quan(tensor, plus_tensor, compress_ratio)
-        minus_indices, minus_mean, minus_mask = quan(tensor, minus_tensor, compress_ratio)
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        plus_tensor = tf.math.greater(tensor_flatten, 0)
+        minus_tensor = tf.math.less(tensor_flatten, 0)
+        plus_indices, plus_mean, plus_mask = quan(tensor_flatten, plus_tensor, compress_ratio)
+        minus_indices, minus_mean, minus_mask = quan(tensor_flatten, minus_tensor, compress_ratio)
 
+        ctx = plus_indices, plus_mean, minus_indices, minus_mean
         if use_memory:
-            residual_mask = tf.math.logical_not(tf.math.logical_or(plus_mask, minus_mask))
-            AdaqCompressor.residuals[name] = tensor * tf.cast(residual_mask, dtype=tf.float32)
-
-        return plus_indices, plus_mean, minus_indices, minus_mean
+            tensor_decompressed = compressor.decompress(tensor, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor, ctx
 
     @staticmethod
-    def decompress(tensor, shape, plus_indices, plus_mean, minus_indices, minus_mean):
-
-        tensor_decompress = tf.Variable(
-            tf.zeros_like(tensor))  # solve the error 'Tensor' object has no attribute '_lazy_read'
+    def decompress(tensor, ctx, params):
+        plus_indices, plus_mean, minus_indices, minus_mean = ctx
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        zero_tensor = tf.Variable(
+            tf.zeros_like(tensor_flatten))  # solve the error 'Tensor' object has no attribute '_lazy_read'
         plus_mean = tf.ones(tf.shape(plus_indices), dtype=tf.float32) * plus_mean
         minus_mean = tf.ones(tf.shape(minus_indices), dtype=tf.float32) * minus_mean
-        tensor_decompress = tf.scatter_update(tensor_decompress, plus_indices, plus_mean)
-        tensor_decompress = tf.scatter_update(tensor_decompress, minus_indices, minus_mean)
-        return tensor_decompress
+        tensor_decompressed = tf.scatter_update(zero_tensor, plus_indices, plus_mean)
+        tensor_decompressed = tf.scatter_update(tensor_decompressed, minus_indices, minus_mean)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 
 class AdapSparseCompressor(Compressor):
-    """Default no-op sparser."""
 
     residuals = {}
 
     @staticmethod
-    def compress(tensor, size, compress_ratio, use_memory):
+    def compress(tensor, params):
 
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in AdapSparseCompressor.residuals:
-                AdapSparseCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tensor + AdapSparseCompressor.residuals[name]
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
 
-        k = compress_ratio
+        k = params["compress_ratio"]
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
         tensor_size = tf.cast(tf.size(tensor), dtype=tensor.dtype)
-        prob = k * tensor_size * tf.abs(tensor) / tf.math.reduce_sum(tf.abs(tensor))
+
+        prob = k * tensor_size * tf.abs(tensor_flatten) / tf.math.reduce_sum(tf.abs(tensor_flatten))
         prob = tf.minimum(prob, 1.0)
 
         c = tf.constant(2.0)
@@ -591,105 +645,79 @@ class AdapSparseCompressor(Compressor):
         res = tf.while_loop(condition, body, (c, prob))
         prob = res[1]
 
-        rnd_sample = tf.random_uniform(tf.shape(tensor))
+        rnd_sample = tf.random_uniform(tf.shape(tensor_flatten))
         mask = tf.less(rnd_sample, prob)
         indices = tf.reshape(tf.where(mask), [-1])
-        vals = tf.gather(tensor / prob, indices)
+        tensor_compressed = tf.gather(tensor_flatten / prob, indices)
+        ctx = indices, tensor_shape
 
         if use_memory:
             residual_mask = tf.cast(tf.math.logical_not(mask), dtype=tf.float32)
-            AdapSparseCompressor.residuals[name] = tensor * residual_mask
-        return vals, indices
+            tensor_decompressed = tensor_flatten * residual_mask
+            tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+            compressor.residuals[name] = tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, ctx):
-
-        return tensor
+    def decompress(tensor_compressed, ctx, params):
+        """Decompress by filling empty slots with zeros and reshape back using the original shape"""
+        indices, tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tf.scatter_update(zero_tensor, indices, tensor_compressed)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 
 class PowerSGDCompressor(Compressor):
-    """Default no-op sparser."""
 
     q_memory = {}
 
     @staticmethod
-    def compress(tensor, use_memory, horovod_size):
-        def orthogonalize(matrix):
-#             with tf.Session():
-#                 m = tf.shape(matrix)[1].eval()
-            m = matrix.get_shape().as_list()[1]
-            step = 0
-            global i
-            i = 0
-
-            def cond(step, matrix):
-                return step < m
-
-            def body(step, matrix):
-                global i
-                col = matrix[:, i]
-                new_col = col / tf.math.sqrt(tf.math.reduce_sum(tf.math.square(col)))
-                new_col = tf.reshape(new_col, [tf.shape(new_col)[0], -1])
-                if i < 1:
-                    rest = matrix[:, (i + 1):]
-                    new_rest = tf.linalg.matmul(new_col, rest, transpose_a=True, )
-                    new_rest = rest - tf.linalg.matmul(new_col, new_rest, )
-                    new_matrix = tf.concat([new_col, new_rest], axis=1)
-                elif (i > 0) and (i < m - 1):
-                    rest = matrix[:, (i + 1):]
-                    new_rest = tf.linalg.matmul(new_col, rest, transpose_a=True, )
-                    new_rest = rest - tf.linalg.matmul(new_col, new_rest, )
-                    head = matrix[:, :i]
-                    new_matrix = tf.concat([head, new_col, new_rest], axis=1)
-                elif i > m - 2:
-                    head = matrix[:, :i]
-                    new_matrix = tf.concat([head, new_col], axis=1)
-                i = i + 1
-                return step + 1, new_matrix
-
-            _, out = tf.while_loop(cond, body, loop_vars=[step, matrix])
-            return out
-
+    def compress(tensor, params):
+        horovod_size = params["horovod_size"]
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         name = tensor.name
-        shape = tf.shape(tensor)
-        matrix = tf.reshape(tensor,[shape[0], -1])
+        tensor_shape = tf.shape(tensor)
+        matrix = tf.reshape(tensor, [tensor_shape[0], -1])
         n = tf.shape(matrix)[0]
         m = tf.shape(matrix)[1]
         r = tf.math.minimum(n, m)
         r = tf.math.minimum(r, tf.rank(tensor))
         if use_memory:
-            if name in PowerSGDCompressor.q_memory:
-                q = PowerSGDCompressor.q_memory[name]
+            if name in compressor.q_memory:
+                q = compressor.q_memory[name]
             else:
                 q = tf.random.normal([m, r])
-                q = orthogonalize(q)
+                q, _ = tf.linalg.qr(q)
         else:
             q = tf.random.normal([m, r])
-            q = orthogonalize(q)
+            q, _ = tf.linalg.qr(q)
         p = tf.linalg.matmul(matrix, q)
         p = _allreduce(p) / horovod_size
-        p = orthogonalize(p)
-        q = tf.linalg.matmul(matrix, p, transpose_a=True,)
+        p, _ = tf.linalg.qr(p)
+        q = tf.linalg.matmul(matrix, p, transpose_a=True)
         q = _allreduce(q) / horovod_size
-        new_tensor = tf.linalg.matmul(p, q, transpose_b=True,)
-        new_tensor = tf.reshape(new_tensor, shape)
+        ctx = p, q, tensor_shape
         if use_memory:
-            PowerSGDCompressor.q_memory[name] = q
-        return new_tensor
+            compressor.q_memory[name] = q
+        return tensor, ctx
 
     @staticmethod
-    def decompress(tensor, ctx):
-
-        return tensor
+    def decompress(tensor, ctx, params):
+        p, q, tensor_shape = ctx
+        new_tensor = tf.linalg.matmul(p, q, transpose_b=True)
+        tensor_decompressed = tf.reshape(new_tensor, tensor_shape)
+        return tensor_decompressed
 
 
 class U8bitCompressor(Compressor):
-    """Default no-op sparser."""
 
     residuals = {}
 
     @staticmethod
-    def compress(tensor, use_memory):
+    def compress(tensor, params):
 
         dict128 = tf.constant(
             [
@@ -728,20 +756,25 @@ class U8bitCompressor(Compressor):
             ], dtype=tf.float32
         )
 
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in U8bitCompressor.residuals:
-                U8bitCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor = tf.math.add(tensor, U8bitCompressor.residuals[name])
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
 
-        scalar = tf.math.reduce_max(tf.abs(tensor))
-        new_tensor = tensor / scalar
-        sign = tf.sign(tensor)
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        tensor_size = tf.size(tensor)
+
+        scaler = tf.math.reduce_max(tf.abs(tensor_flatten))
+        new_tensor = tensor_flatten / scaler
+        sign = tf.sign(tensor_flatten)
         new_tensor = tf.abs(new_tensor)
 
-        pivot = 64 * tf.ones([tf.shape(tensor)[0]], dtype=tf.int32)
-        left = tf.zeros([tf.shape(tensor)[0]], dtype=tf.int32)
-        right = 127 * tf.ones([tf.shape(tensor)[0]], dtype=tf.int32)
+        pivot = 64 * tf.ones([tensor_size], dtype=tf.int32)
+        left = tf.zeros([tensor_size], dtype=tf.int32)
+        right = 127 * tf.ones([tensor_size], dtype=tf.int32)
 
         step = 5
 
@@ -759,15 +792,18 @@ class U8bitCompressor(Compressor):
             return step - 1, input_tensor, pivot, left, right
 
         step, _, pivot, left, right = tf.while_loop(cond, body, loop_vars=[step, new_tensor, pivot, left, right])
-        new_tensor = tf.cast(pivot, dtype=tf.int8) * tf.cast(sign, dtype=tf.int8)
+        tensor_compressed = tf.cast(pivot, dtype=tf.int8) * tf.cast(sign, dtype=tf.int8)
+        scaler = tf.reshape(scaler, [-1])
+        ctx = scaler, tensor_shape
 
         if use_memory:
-            U8bitCompressor.residuals[name] = tensor - U8bitCompressor.decompress(new_tensor, scalar)
-
-        return new_tensor, scalar
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, scalar):
+    def decompress(tensor, ctx, params):
+        scaler, tensor_shape = ctx
         dict128 = tf.constant(
             [
                 1.5000001e-06, 2.7500000e-06, 7.2499997e-06, 1.8750001e-05,
@@ -808,46 +844,52 @@ class U8bitCompressor(Compressor):
         tensor = tf.cast(tensor, dtype=tf.int32)
         sign = tf.cast(tf.sign(tensor), dtype=tf.float32)
         index = tf.cast(tf.abs(tensor), dtype=tf.int32)
-        tensor_decompress = tf.gather(dict128, index) * scalar * sign
-        return tensor_decompress
+        tensor_decompressed = tf.gather(dict128, index) * scaler * sign
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 
 class NaturalCompressor(Compressor):
-    """Default no-op sparser."""
 
     residuals = {}
 
     @staticmethod
-    def compress(tensor, use_memory):
+    def compress(tensor, params):
 
+        use_memory = params["use_memory"]
+        compressor = params["compressor"]
         if use_memory:
             name = tensor.name
-            if name not in NaturalCompressor.residuals:
-                NaturalCompressor.residuals[name] = tf.zeros_like(tensor, dtype=tensor.dtype)
-            tensor += NaturalCompressor.residuals[name]
+            if name in compressor.residuals:
+                tensor += compressor.residuals[name]
 
-        zeros = tf.zeros_like(tensor)
-        exponent = tf.math.log(tf.abs(tensor)) / tf.math.log(2.0)
-        h1 = tf.math.floor(tf.where(tf.math.abs(tensor) != 0, exponent, zeros))
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
 
-        h2 = tf.where(tf.math.abs(tensor) != 0, tf.math.pow(2.0, h1), zeros)
+        zeros = tf.zeros_like(tensor_flatten)
+        exponent = tf.math.log(tf.abs(tensor_flatten)) / tf.math.log(2.0)
+        h1 = tf.math.floor(tf.where(tf.math.abs(tensor_flatten) != 0, exponent, zeros))
+        h2 = tf.where(tf.math.abs(tensor_flatten) != 0, tf.math.pow(2.0, h1), zeros)
         # extract probability
-        p = tf.where(h2 != 0, tf.abs(tensor) / h2 - 1, h2)
+        p = tf.where(h2 != 0, tf.abs(tensor_flatten) / h2 - 1, h2)
         u = tf.floor(tf.random_uniform(tf.shape(p)) + p)
         tensor_compressed = h1 + u
         tensor_compressed = tf.cast(tensor_compressed, dtype=tf.int8)
-        sign = tf.cast(tf.sign(tensor), dtype=tf.int8)
+        sign = tf.cast(tf.sign(tensor_flatten), dtype=tf.int8)
+        ctx = sign, tensor_shape
 
         if use_memory:
-            NaturalCompressor.residuals[name] = tensor - NaturalCompressor.decompress(tensor_compressed, sign)
-
-        return tensor_compressed, sign
+            tensor_decompressed = compressor.decompress(tensor_compressed, ctx, params)
+            compressor.residuals[name] = tensor - tensor_decompressed
+        return tensor_compressed, ctx
 
     @staticmethod
-    def decompress(tensor, sign):
-        tensor = tf.cast(tensor, dtype=tf.float32)
+    def decompress(tensor_compressed, ctx, params):
+        sign, tensor_shape = ctx
+        tensor = tf.cast(tensor_compressed, dtype=tf.float32)
         sign = tf.cast(sign, dtype=tf.float32)
         tensor_decompressed = sign * tf.math.pow(2.0, tensor)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
 
