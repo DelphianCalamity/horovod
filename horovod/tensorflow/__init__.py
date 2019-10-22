@@ -35,7 +35,7 @@ from horovod.tensorflow.util import _executing_eagerly, _make_subgraph, _cache
 
 import tensorflow as tf
 import math
-
+import json
 
 def allreduce(tensor, average=True, device_dense='', device_sparse='',
                    compression=Compression.none,
@@ -94,9 +94,14 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     default_params["horovod_size"] = size()
     default_params["compressor"] = comp_dict[default_params["compress_method"]]
 
-    for argument in default_params:
-        if argument not in params:
-            params[argument] = default_params[argument]
+    if params is None:
+        params = default_params
+    else:
+        if type(params) == str:
+            params = json.loads(params)
+        for argument in default_params:
+            if argument not in params:
+                params[argument] = default_params[argument]
 
     params["compressor"] = comp_dict[params["compress_method"]]
     compress_method = params["compress_method"]
@@ -622,7 +627,7 @@ def _make_allreduce_grads_fn(name, device_dense, device_sparse,
                               device_dense=device_dense,
                               device_sparse=device_sparse,
                               compression=compression,
-                              params = params,)
+                              params=params,)
                     if grad is not None else grad
                     for grad in grads]
 
@@ -650,7 +655,7 @@ if _LegacyOptimizer is not None:
 
         def __init__(self, optimizer, name=None, use_locking=False, device_dense='',
                     device_sparse='', compression=Compression.none,
-                    sparse_as_dense=False):
+                    sparse_as_dense=False, params=None):
             if name is None:
                 name = "Distributed{}".format(type(optimizer).__name__)
             super(_DistributedOptimizer, self).__init__(name=name, use_locking=use_locking)
@@ -692,7 +697,7 @@ if _LegacyOptimizer is not None:
 
 def DistributedOptimizer(optimizer, name=None, use_locking=False, device_dense='',
                          device_sparse='', compression=Compression.none,
-                         sparse_as_dense=False):
+                         sparse_as_dense=False, params=None):
     """Construct a new DistributedOptimizer, which uses another optimizer
     under the hood for computing single-process gradient values and
     applying gradient updates after the gradient values have been averaged
@@ -722,13 +727,15 @@ def DistributedOptimizer(optimizer, name=None, use_locking=False, device_dense='
         performance and memory utilization if the original sparse gradient
         has high density.  Defaults to false.
     """
+    if type(params) == dict:
+        params = json.dumps(params)
     if isinstance(optimizer, _LegacyOptimizer):
         return _DistributedOptimizer(optimizer, name, use_locking, device_dense,
-                                     device_sparse, compression, sparse_as_dense)
+                                     device_sparse, compression, sparse_as_dense, params)
     elif isinstance(optimizer, tf.keras.optimizers.Optimizer):
         import horovod.tensorflow.keras as hvd_k
         return hvd_k.DistributedOptimizer(optimizer, name, device_dense, device_sparse,
-                                          compression, sparse_as_dense)
+                                          compression, sparse_as_dense, params)
     else:
         raise ValueError('Provided optimizer doesn\'t inherit from either legacy '
                          'TensorFlow or Keras optimizer: %s' % optimizer)
@@ -736,8 +743,8 @@ def DistributedOptimizer(optimizer, name=None, use_locking=False, device_dense='
 
 if hasattr(tf, 'GradientTape'):
     class _DistributedGradientTape(tf.GradientTape):
-        def __init__(self, tape, device_dense, device_sparse, compression, sparse_as_dense,
-                     persistent=False, watch_accessed_variables=True, params=None):
+        def __init__(self, tape, device_dense, device_sparse, compression, sparse_as_dense, params=None,
+                     persistent=False, watch_accessed_variables=True,):
             if hasattr(tape, '_watch_accessed_variables'):
                 super(self.__class__, self).__init__(persistent, watch_accessed_variables)
             else:
@@ -757,7 +764,7 @@ if hasattr(tf, 'GradientTape'):
 
 
     def DistributedGradientTape(gradtape, device_dense='', device_sparse='',
-                                compression=Compression.none, sparse_as_dense=False):
+                                compression=Compression.none, sparse_as_dense=False, params=None):
         """A tape that wraps another tf.GradientTape, using an allreduce to
         average gradient values before applying gradients to model weights.
         Args:
@@ -782,8 +789,8 @@ if hasattr(tf, 'GradientTape'):
                    dict(_DistributedGradientTape.__dict__))
         if hasattr(gradtape, '_watch_accessed_variables'):
             return cls(gradtape._tape, device_dense, device_sparse, compression,
-                       sparse_as_dense, gradtape._persistent,
+                       sparse_as_dense, params, gradtape._persistent,
                        gradtape._watch_accessed_variables)
         else:
             return cls(gradtape._tape, device_dense, device_sparse, compression,
-                       sparse_as_dense, gradtape._persistent)
+                       sparse_as_dense, params, gradtape._persistent)
