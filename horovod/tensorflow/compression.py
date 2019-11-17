@@ -1037,6 +1037,7 @@ class NaturalCompressor_old(Compressor):
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
+
 class NaturalCompressor(Compressor):
     """"""
 
@@ -1063,14 +1064,15 @@ class NaturalCompressor(Compressor):
         return tensor_compressed, tensor_shape
 
     @staticmethod
-    def decompress(tensor_compressed, tensor_shape, params):
+    def decompress(tensor_compressed, tensor_shape, params=None):
         sign = tensor_compressed > 127
         exps = tf.bitwise.bitwise_and(tensor_compressed, 0b01111111)
-        non_zero = tf.bitwise.left_shift(tf.cast(exps + 18, tf.int32), 23)
-        positive = tf.where(exps < 1, tf.zeros_like(non_zero), non_zero)
-        positive_cast = tf.bitcast(positive, tf.float32)
-        tensor_decompressed = tf.where(sign, -positive_cast, positive_cast)
+        exps_shift = tf.bitwise.left_shift(tf.cast(exps + 18, tf.int32), 23)
+        floats = tf.bitcast(exps_shift, tf.float32)
+        tensor_decompressed = tf.where(sign, -floats, floats)
+        tensor_decompressed = tf.multiply(tf.cast(exps >= 1, tensor_decompressed.dtype), tensor_decompressed)
         return tf.reshape(tensor_decompressed, tensor_shape)
+
 
 class SketchCompressor(Compressor):
     """"""
