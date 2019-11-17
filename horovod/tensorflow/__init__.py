@@ -365,6 +365,8 @@ if _SessionRunHook is not None and _get_default_graph is not None:
 @_cache
 def _make_allreduce_grads_fn(name, device_dense, device_sparse,
                              compression, sparse_as_dense, params):
+    if type(params)==str:
+        params = json.loads(params)
     def allreduce_grads(grads):
         with tf.name_scope(name + "_Allreduce"):
             if sparse_as_dense:
