@@ -100,7 +100,10 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     default_params['tensor_rank'] = len(tensor.get_shape().as_list())
     default_params['debug'] = False
     default_params['compression_device'] = device_dense
-
+    
+    if params is None:
+        params = {}
+    
     for argument in default_params:
         if argument not in params:
             params[argument] = default_params[argument]
