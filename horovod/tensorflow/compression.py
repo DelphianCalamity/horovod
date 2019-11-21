@@ -23,33 +23,32 @@ class Compressor(object):
     @classmethod
     def memory_compensate(cls, tensor, params):
         """Update the tensor with the residuals."""
-        name = tensor.name
-        if name in cls.residuals:
-            tensor += cls.residuals[name]
+        use_memory = params['use_memory']
+        beta = params['beta']
+        gamma = params['gamma']
+        if use_memory:
+            name = tensor.name
+            if name in cls.residuals:
+                tensor = beta * cls.residuals[name] + gamma * tensor
         return tensor
 
     @classmethod
     def memory_update(cls, tensor, tensor_compressed, ctx, params):
         """Update the residuals."""
-        name = tensor.name
-        tensor_decompressed = cls.decompress(tensor_compressed, ctx, params)
-        cls.residuals[name] = tensor - tensor_decompressed
+        use_memory = params['use_memory']
+        if use_memory:
+            name = tensor.name
+            tensor_decompressed = cls.decompress(tensor_compressed, ctx, params)
+            cls.residuals[name] = tensor - tensor_decompressed
 
     @staticmethod
     def aggregate(tensors, params):
         """Aggregate a list of tensors."""
+        average = params['average']
         agged_tensor = tf.math.add_n(tensors)
+        horovod_size = tf.cast(params["horovod_size"], dtype=agged_tensor.dtype)
+        agged_tensor = (agged_tensor / horovod_size) if average else agged_tensor
         return agged_tensor
-
-    @staticmethod
-    def pack(tensor, params):
-        """Pack a  tensor."""
-        pass
-
-    @staticmethod
-    def unpack(tensor, params):
-        """Unpack a  tensor."""
-        pass
 
 class NoneCompressor(Compressor):
     """Default no-op compression."""

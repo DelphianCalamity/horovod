@@ -81,7 +81,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     comp_dict["8bit"] = Compression.u8bit
     comp_dict["natural"] = Compression.natural
     comp_dict["sketch"] = Compression.sketch
-    # testing
+    #testing
     comp_dict["nonetest"] = Compression.nonetest
 
     default_params = {}
@@ -100,22 +100,31 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     default_params['tensor_rank'] = len(tensor.get_shape().as_list())
     default_params['debug'] = False
     default_params['compression_device'] = device_dense
-    
+    default_params['average'] = average
+    default_params['beta'] = 1.0
+    default_params['gamma'] = 0
+
     if params is None:
-        params = {}
-    
+        params={}
+        params["compress_method"] = 'none'
+        params["comm_method"] = 'allreduce'
+    elif ("compress_method" in params) and ("comm_method" not in params):
+        params["comm_method"] = 'allreduce' if params["compress_method"] == 'none' else 'allgather'
+
     for argument in default_params:
         if argument not in params:
             params[argument] = default_params[argument]
+
 
     params["compressor"] = comp_dict[params["compress_method"]]
     comm_method = params["comm_method"]
     horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
     compression = params["compressor"]
 
-    if params['compression_device'] == '':
+    if params['compression_device'] =='':
         params['compression_device'] = device_dense
 
+    #print(params)
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
             # For IndexedSlices, do two allgathers intead of an allreduce.
@@ -130,10 +139,6 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                                 dense_shape=tensor.dense_shape)
     else:
         with tf.device(device_dense):
-            # tensor_flatten = tf.reshape(tensor, [-1])
-            # elemnum = tensor_flatten.get_shape().as_list()[0]
-
-            # communication function
 
             def Allreduce(tensors):
                 if tensors is None:
@@ -166,7 +171,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                     tensors_size.append(tf.reshape(tf.size(tensors[i]), [-1]))
                     tensors_shape[i] = tf.shape(tensors[i])
                     tensors_1d[i] = tf.reshape(tensors[i], [-1])
-                    # print tensor size
+                    #print tensor size
                     if params['debug']:
                         tensors_1d[i] = tf.Print(tensors_1d[i], [tf.size(tensors_1d[i])],
                                                  message="==Debug== tensor %d on rank %d %s size:"
@@ -186,7 +191,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                 index_a = defaultdict(int)
                 index_b = {}
                 for ranki in range(size()):
-                    tensors_size = tensors_size_ag[num * ranki:num * (ranki + 1)]
+                    tensors_size = tensors_size_ag[num * ranki:num * (ranki+1)]
                     for i in range(len(tensors)):
                         index_b[i] = index_a[i] + tensors_size[i]
                         new_tensors[ranki].append(tf.reshape(tensors_ag[i][index_a[i]:index_b[i]], tensors_shape[i]))
@@ -209,15 +214,17 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                         new_tensors[ranki].append(broadcast(tensors[i], root_rank=ranki, name=None))
                 return new_tensors
 
-            use_memory = params["use_memory"]
-            if use_memory:
-                tensor = compression.memory_compensate(tensor, params)
+            communicate = {}
+            communicate['allreduce'] = Allreduce
+            communicate['allgather'] = Allgather
+            communicate['broadcast'] = Broadcast
+
+            tensor = compression.memory_compensate(tensor, params)
 
             with tf.device(params['compression_device']):
                 tensor_compressed, ctx = compression.compress(tensor, params)
 
-            if use_memory:
-                compression.memory_update(tensor, tensor_compressed, ctx, params)
+            compression.memory_update(tensor, tensor_compressed, ctx, params)
 
             if comm_method == 'allreduce':
                 summed_tensor_compressed = Allreduce(tensor_compressed)
@@ -228,8 +235,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                     summed_tensor = compression.decompress(summed_tensor_compressed, ctx, params)
                 new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
-            elif comm_method == 'broadcast':
-                list_tensor_compressed = Broadcast(tensor_compressed)
+            elif comm_method in ['broadcast', 'allgather']:
+                list_tensor_compressed = communicate[comm_method](tensor_compressed)
 
                 with tf.device(params['compression_device']):
                     list_tensor_decompressed = []
@@ -241,24 +248,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                         list_tensor_decompressed.append(
                             compression.decompress(tensor_compressed, ctx, params))
 
-                agged_tensor = compression.aggregate(list_tensor_decompressed, params)
-                new_tensor = (agged_tensor / horovod_size) if average else agged_tensor
+                new_tensor = compression.aggregate(list_tensor_decompressed, params)
 
-            elif comm_method == 'allgather':
-                list_tensor_compressed = Allgather(tensor_compressed)
-
-                with tf.device(params['compression_device']):
-                    list_tensor_decompressed = []
-                    for ranki in range(size()):
-                        if len(list_tensor_compressed[ranki]) == 1:
-                            tensor_compressed = list_tensor_compressed[ranki][0]
-                        else:
-                            tensor_compressed = list_tensor_compressed[ranki]
-                        list_tensor_decompressed.append(
-                            compression.decompress(tensor_compressed, ctx, params))
-
-                agged_tensor = compression.aggregate(list_tensor_decompressed, params)
-                new_tensor = (agged_tensor / horovod_size) if average else agged_tensor
         return new_tensor
 
 
