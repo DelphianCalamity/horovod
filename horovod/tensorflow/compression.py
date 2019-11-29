@@ -828,7 +828,8 @@ class PowerSGDCompressor(Compressor):
 
     @staticmethod
     def compress(tensor, params):
-        if params['tensor_rank'] == 1:
+        tensor_rank = len(tensor.get_shape().as_list())
+        if tensor_rank == 1:
             return tensor, None
         horovod_size = params["horovod_size"]
         use_memory = params["use_memory"]
@@ -861,7 +862,8 @@ class PowerSGDCompressor(Compressor):
 
     @staticmethod
     def decompress(tensor, ctx, params):
-        if params['tensor_rank'] == 1:
+        tensor_rank = len(tensor.get_shape().as_list())
+        if tensor_rank == 1:
             return tensor
         p, q, tensor_shape = ctx
         new_tensor = tf.linalg.matmul(p, q, transpose_b=True)
