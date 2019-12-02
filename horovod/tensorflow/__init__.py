@@ -16,6 +16,8 @@
 # pylint: disable=g-short-docstring-punctuation
 # horovod version: v0.18.1
 
+import os
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -37,10 +39,8 @@ import tensorflow as tf
 import math
 import json
 
-def allreduce(tensor, average=True, device_dense='', device_sparse='',
-                   compression=Compression.none,
-                   params = None,
-                   ):
+# explicitly pass compression=Compression.none to disable compression when environment variables are set
+def allreduce(tensor, average=True, device_dense='', device_sparse='', compression=None, params=None):
     """Perform an allreduce on a tf.Tensor or tf.IndexedSlices.
 
     Arguments:
@@ -61,6 +61,23 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     allgather on the values and the indices, effectively doing an allreduce on
     the represented tensor.
     """
+
+    if compression is None:
+        params = {
+            "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
+            "comm_method": os.environ.get('HOROVOD_COMM_METHOD', 'allreduce'),
+            "use_memory": True if os.environ.get('HOROVOD_USE_MEMORY', False) else False,
+            "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
+            "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
+            "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
+            "gradient_clipping": True if os.environ.get('HOROVOD_GRADIENT_CLIPPING', False) else False,
+            "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
+            "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
+            "debug": True if os.environ.get('HOROVOD_DEBUG', False) else False,
+            "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
+            "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 0))
+        }
+
 
     comp_dict = {}
     comp_dict["none"] = Compression.none
@@ -114,7 +131,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
         if argument not in params:
             params[argument] = default_params[argument]
 
-    params["compressor"] = comp_dict[params["compress_method"]]
+    params["compressor"] = compression if compression else comp_dict[params["compress_method"]]
     comm_method = params["comm_method"]
     horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
     compression = params["compressor"]
@@ -397,7 +414,7 @@ if _LegacyOptimizer is not None:
         average gradient values before applying gradients to model weights."""
 
         def __init__(self, optimizer, name=None, use_locking=False, device_dense='',
-                    device_sparse='', compression=Compression.none,
+                    device_sparse='', compression=None,
                     sparse_as_dense=False, params=None):
             if name is None:
                 name = "Distributed{}".format(type(optimizer).__name__)
@@ -439,7 +456,7 @@ if _LegacyOptimizer is not None:
 
 
 def DistributedOptimizer(optimizer, name=None, use_locking=False, device_dense='',
-                         device_sparse='', compression=Compression.none,
+                         device_sparse='', compression=None,
                          sparse_as_dense=False, params=None):
     """Construct a new DistributedOptimizer, which uses another optimizer
     under the hood for computing single-process gradient values and
@@ -507,7 +524,7 @@ if hasattr(tf, 'GradientTape'):
 
 
     def DistributedGradientTape(gradtape, device_dense='', device_sparse='',
-                                compression=Compression.none, sparse_as_dense=False, params=None):
+                                compression=None, sparse_as_dense=False, params=None):
         """A tape that wraps another tf.GradientTape, using an allreduce to
         average gradient values before applying gradients to model weights.
         Args:
