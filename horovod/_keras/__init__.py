@@ -18,9 +18,9 @@ import tensorflow as tf
 
 
 def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sparse,
-                                 compression, sparse_as_dense):
+                                 compression, sparse_as_dense, params):
     class _DistributedOptimizer(keras.optimizers.Optimizer):
-        def __init__(self, name, device_dense, device_sparse, compression, sparse_as_dense,
+        def __init__(self, name, device_dense, device_sparse, compression, sparse_as_dense, params,
                      config):
             if name is None:
                 name = "Distributed%s" % self.__class__.__base__.__name__
@@ -29,15 +29,14 @@ def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sp
             self._device_sparse = device_sparse
             self._compression = compression
             self._sparse_as_dense = sparse_as_dense
+            self._params = params
             self._get_gradients_used = False
             super(self.__class__, self).__init__(**config)
 
         def get_gradients(self, loss, params):
             """
             Compute gradients of all trainable variables.
-
             See Optimizer.get_gradients() for more info.
-
             In DistributedOptimizer, get_gradients() is overriden to also
             allreduce the gradients before returning them.
             """
@@ -54,7 +53,8 @@ def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sp
                             avg_grad = hvd.allreduce(grad,
                                                      device_dense=self._device_dense,
                                                      device_sparse=self._device_sparse,
-                                                     compression=self._compression)
+                                                     compression=self._compression,
+                                                     params=self._params)
                             averaged_gradients.append(avg_grad)
                         else:
                             averaged_gradients.append(None)
@@ -72,7 +72,7 @@ def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sp
 
         @classmethod
         def from_config(cls, cfg):
-            return cls(name, device_dense, device_sparse, compression, sparse_as_dense, cfg)
+            return cls(name, device_dense, device_sparse, compression, sparse_as_dense, params, cfg)
 
     # We dynamically create a new class that inherits from the optimizer that was passed in.
     # The goal is to override get_gradients() method with an allreduce implementation.
@@ -80,7 +80,7 @@ def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sp
     # model could be easily restored without Horovod.
     cls = type(optimizer.__class__.__name__, (optimizer.__class__,),
                dict(_DistributedOptimizer.__dict__))
-    return cls(name, device_dense, device_sparse, compression, sparse_as_dense,
+    return cls(name, device_dense, device_sparse, compression, sparse_as_dense, params,
                optimizer.get_config())
 
 
