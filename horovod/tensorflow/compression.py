@@ -862,8 +862,7 @@ class PowerSGDCompressor(Compressor):
 
     @staticmethod
     def decompress(tensor, ctx, params):
-        tensor_rank = len(tensor.get_shape().as_list())
-        if tensor_rank == 1:
+        if ctx is None:
             return tensor
         p, q, tensor_shape = ctx
         new_tensor = tf.linalg.matmul(p, q, transpose_b=True)
