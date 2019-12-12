@@ -117,7 +117,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     # default_params['compression_device'] = device_dense
     default_params['average'] = average
     default_params['beta'] = 1.0
-    default_params['gamma'] = 0
+    default_params['gamma'] = 1.0
 
     if params is None:
         params={}
