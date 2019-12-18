@@ -538,7 +538,7 @@ class DgcCompressor(Compressor):
     @classmethod
     def memory_compensate(cls, tensor, params):
         """Update the tensor with the residuals."""
-        name = tensor.name
+        #name = tensor.name
 
         horovod_size = params["horovod_size"]
         momentum = params["momentum"]
@@ -548,7 +548,7 @@ class DgcCompressor(Compressor):
             thr_global = tf.math.sqrt(_allreduce(tensor_squ_sum))
             clipping_val = thr_global / tf.math.sqrt(float(horovod_size))
             tensor = tf.clip_by_value(tensor, -clipping_val, clipping_val)
-
+        name = tensor.name
         if name in cls.residuals:
             cls.residuals[name] = momentum * cls.residuals[name] + tensor
         else:
