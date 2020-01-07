@@ -164,8 +164,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 for i in range(len(tensors)):
                     if params['debug']:
                         tensors[i] = tf.Print(tensors[i], [tf.size(tensors[i])],
-                                              message="==Debug== tensor %d on rank %d %s size:"
-                                                      % (i, rank(), tensors[i].dtype))
+                                              message="==Debug== tensor %d/%d on rank %d %s size:"
+                                                      % (i, len(tensors), rank(), tensors[i].dtype))
                     summed_tensor_compressed.append(_allreduce(tensors[i]))
                 return summed_tensor_compressed
 
@@ -188,8 +188,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                     #print tensor size
                     if params['debug']:
                         tensors_1d[i] = tf.Print(tensors_1d[i], [tf.size(tensors_1d[i])],
-                                                 message="==Debug== tensor %d on rank %d %s size:"
-                                                         % (i, rank(), tensors_1d[i].dtype))
+                                                 message="==Debug== tensor %d/%d on rank %d %s size:"
+                                                         % (i, len(tensors), rank(), tensors_1d[i].dtype))
                     tensors_ag[i] = allgather(tensors_1d[i])
                 tensors_size = tf.concat(tensors_size, 0)
 
@@ -223,8 +223,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                     for i in range(len(tensors)):
                         if params['debug']:
                             tensors[i] = tf.Print(tensors[i], [tf.size(tensors[i])],
-                                                  message="==Debug== tensor %d on rank %d %s size:"
-                                                          % (i, rank(), tensors[i].dtype))
+                                                  message="==Debug== tensor %d/%d on rank %d %s size:"
+                                                          % (i, len(tensors), rank(), tensors[i].dtype))
                         new_tensors[ranki].append(broadcast(tensors[i], root_rank=ranki, name=None))
                 return new_tensors
 
@@ -430,6 +430,8 @@ if _LegacyOptimizer is not None:
             allreduce the gradients before returning them.
             """
             gradients = self._optimizer.compute_gradients(*args, **kwargs)
+            if os.environ.get('HOROVOD_DEBUG', False):
+                print(f"==Debug== The model has {len(grads)} gradient tensors")
             if size() > 1:
                 grads, vars = zip(*gradients)
                 avg_grads = self._allreduce_grads(grads)
