@@ -431,7 +431,7 @@ if _LegacyOptimizer is not None:
             """
             gradients = self._optimizer.compute_gradients(*args, **kwargs)
             if os.environ.get('HOROVOD_DEBUG', False):
-                print(f"==Debug== The model has {len(grads)} gradient tensors")
+                print(f"==Debug== The model has {len(gradients)} gradient tensors")
             if size() > 1:
                 grads, vars = zip(*gradients)
                 avg_grads = self._allreduce_grads(grads)
