@@ -545,6 +545,9 @@ class DgcCompressor(Compressor):
         gradient_clipping = params["gradient_clipping"]
         if gradient_clipping:
             tensor_squ_sum = tf.math.reduce_sum(tf.math.square(tensor))
+            if params['debug']:
+                tensor_squ_sum = tf.Print(tensor_squ_sum, [tf.size(tensor_squ_sum)],
+                                          message=f"==Debug== tensor 0/1 on rank {rank()} {tensor_squ_sum.dtype} size:")
             thr_global = tf.math.sqrt(_allreduce(tensor_squ_sum))
             clipping_val = thr_global / tf.math.sqrt(float(horovod_size))
             tensor = tf.clip_by_value(tensor, -clipping_val, clipping_val)
@@ -851,9 +854,15 @@ class PowerSGDCompressor(Compressor):
             q = tf.random.normal([m, r])
             q, _ = tf.linalg.qr(q)
         p = tf.linalg.matmul(matrix, q)
+        if params['debug']:
+            p = tf.Print(p, [tf.size(p)],
+                         message=f"==Debug== tensor 0/1 on rank {rank()} {p.dtype} size:")
         p = _allreduce(p) / horovod_size
         p, _ = tf.linalg.qr(p)
         q = tf.linalg.matmul(matrix, p, transpose_a=True)
+        if params['debug']:
+            q = tf.Print(q, [tf.size(q)],
+                         message=f"==Debug== tensor 0/1 on rank {rank()} {q.dtype} size:")
         q = _allreduce(q) / horovod_size
         ctx = p, q, tensor_shape
         if use_memory:
