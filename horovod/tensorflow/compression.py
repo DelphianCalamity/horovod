@@ -3,6 +3,7 @@
 import tensorflow as tf
 import random, math
 from horovod.tensorflow.mpi_ops import _allreduce
+from horovod.tensorflow.mpi_ops import rank
 
 
 class Compressor(object):
