@@ -584,15 +584,30 @@ class DgcCompressor(Compressor):
         tensor_flatten = tf.reshape(tensor, [-1])
         elemnum = tensor_flatten.get_shape().as_list()[0]
 
-        sample_shape = tf.reshape(tf.convert_to_tensor(max(1, int(elemnum * 0.1)), dtype=tf.int32), [-1])
+        sample_shape = tf.reshape(tf.convert_to_tensor(max(1, int(elemnum * 0.01)), dtype=tf.int32), [-1])
         sample_index = tf.random.uniform(sample_shape, minval=0, maxval=elemnum, dtype=tf.int32)
         sample_tensor = tf.gather(tensor_flatten, sample_index)
 
-        k = max(1, int(elemnum * compress_ratio * 0.1))
+        k = max(1, int(elemnum * compress_ratio * 0.01))
         vals, indices = tf.math.top_k(tf.math.abs(sample_tensor), k)
         thr = tf.math.reduce_min(vals)
-
         mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
+
+        selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
+
+        def body(thr, mask, selected):
+            thr = tf.cond(selected > 1.3 * elemnum * compress_ratio, lambda: 1.3 * thr, lambda: 0.7 * thr)
+            mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
+            selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
+            return thr, mask, selected
+
+        def condition(thr, mask, selected):
+            cond_a = selected > 1.3 * elemnum * compress_ratio
+            cond_b = selected < 0.7 * elemnum * compress_ratio
+            return tf.math.logical_or(cond_a, cond_b)
+
+        thr, mask, _ = tf.while_loop(condition, body, (thr, mask, selected), maximum_iterations=10)
+        
         indices = tf.reshape(tf.where(mask), [-1])
         values = tf.boolean_mask(tensor_flatten, mask)
 
@@ -615,82 +630,7 @@ class DgcCompressor(Compressor):
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
-class AdaqCompressor_new(Compressor):
-    """"""
 
-    @staticmethod
-    def compress(tensor, params):
-        compress_ratio = params["compress_ratio"]
-
-        def quan(tensor, tensor_mask, compress_ratio):
-            # tensor_mask = tf.math.greater_equal(tf.math.abs(tensor),0) # for testing and debuging
-            tensor_value = tf.abs(tf.boolean_mask(tensor, tensor_mask))
-            zero = tf.zeros([1], dtype=tensor_value.dtype)
-            tensor_value = tf.concat([tensor_value, zero], 0)
-            # mask_size = tf.reduce_sum(tf.cast(tensor_mask, dtype=tf.int32)) + 1
-            # Rounds the values of a tensor to the nearest integer
-            mask_size = tf.cast(tf.size(tensor_value), dtype=tf.float32)
-            sample_size = tf.cast(tf.reshape((tf.math.floor(mask_size * 0.1))+1, [-1]), dtype=tf.int32)
-            sample_index = tf.random.uniform(sample_size, minval=0, maxval=tf.cast(mask_size, dtype=tf.int32)+1, dtype=tf.int32)
-            sample_tensor = tf.gather(tensor_value, sample_index)
-
-            k = tf.cast((tf.math.floor(tf.cast(sample_size, dtype=tf.float32) * compress_ratio)), dtype=tf.int32) + 1
-            vals, indices = tf.math.top_k(sample_tensor, k)
-            thr = tf.math.reduce_min(vals)
-
-            tensor_masked = tf.cast(tensor_mask, dtype=tf.float32) * tensor
-            mask = tf.math.greater(tf.math.abs(tensor_masked), thr)
-            indices = tf.reshape(tf.where(mask), [-1])
-
-            tensor_value = tf.boolean_mask(tensor, mask)
-            # mean = tf.reshape(tf.math.reduce_mean(tensor_value), [-1])
-            sum = tf.math.reduce_sum(tensor_value)
-            num = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
-            num = tf.where(tf.math.greater(num, 0), num, 1.0)
-            mean = sum / num
-
-            mask = tf.cast(mask, dtype=tf.int8)
-            mean = tf.reshape(mean, [-1])
-            return indices, mean, mask
-
-        tensor_shape = tf.shape(tensor)
-        tensor_flatten = tf.reshape(tensor, [-1])
-        plus_mask = tf.math.greater_equal(tensor_flatten, 0)
-        minus_mask = tf.math.less(tensor_flatten, 0)
-        plus_indices, plus_mean, plus_mask = quan(tensor_flatten, plus_mask, compress_ratio)
-        minus_indices, minus_mean, minus_mask = quan(tensor_flatten, minus_mask, compress_ratio)
-
-        tensor_compressed = plus_mask - minus_mask
-        mean = tf.concat([plus_mean, minus_mean], 0)
-
-        ctx = mean, tensor_shape
-        #ctx = plus_indices, plus_mean, minus_indices, minus_mean
-        params['tensors_size_are_same'] = False
-        return tensor_compressed, ctx
-
-    @staticmethod
-    def decompress(tensor_compressed, ctx, params):
-        """
-        plus_indices, plus_mean, minus_indices, minus_mean = ctx
-        tensor_shape = tf.shape(tensor)
-        tensor_flatten = tf.reshape(tensor, [-1])
-        zero_tensor = tf.Variable(tf.zeros_like(tensor_flatten))  # solve the error 'Tensor' object has no attribute '_lazy_read'
-        plus_mean = tf.ones(tf.shape(plus_indices), dtype=tf.float32) * plus_mean
-        minus_mean = tf.ones(tf.shape(minus_indices), dtype=tf.float32) * minus_mean
-        tensor_decompressed = tf.scatter_update(zero_tensor, plus_indices, plus_mean)
-        tensor_decompressed = tf.scatter_update(tensor_decompressed, minus_indices, minus_mean)
-        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
-        """
-        mask = tensor_compressed
-        mean, tensor_shape = ctx
-        plus_mean, minus_mean = tf.split(mean, 2)
-        #plus_mean, minus_mean = mean
-        mask = tf.cast(mask, dtype=tf.float32)
-        sign = tf.sign(mask)
-        tensor_decompressed = sign*(mask + 1) * plus_mean / 2 + sign*(mask - 1) * minus_mean / 2
-        #tensor_decompressed = mask * plus_mean
-        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
-        return tensor_decompressed
 
 class AdaqCompressor(Compressor):
     """"""
@@ -704,18 +644,34 @@ class AdaqCompressor(Compressor):
             # tensor_mask = tf.math.greater_equal(tf.math.abs(tensor),0) # for testing and debuging
             tensor_value = tf.boolean_mask(tensor, tensor_mask)
             mask_size = tf.reduce_sum(tf.cast(tensor_mask, dtype=tf.int32))
-            sample_size = tf.cast(tf.reshape((tf.math.round(tf.cast(mask_size, dtype=tf.float32) * 0.1)), [-1]),
+            sample_size = tf.cast(tf.reshape((tf.math.round(tf.cast(mask_size, dtype=tf.float32) * 0.01)), [-1]),
                                    dtype=tf.int32)
             sample_index = tf.random.uniform(sample_size, minval=0, maxval=mask_size, dtype=tf.int32)
             sample_tensor = tf.gather(tensor_value, sample_index)
-
-            k = tf.cast((tf.math.round(tf.cast(mask_size, dtype=tf.float32) * 0.1 * compress_ratio)),
+            k = tf.cast((tf.math.round(tf.cast(mask_size, dtype=tf.float32) * 0.01 * compress_ratio)),
                         dtype=tf.int32)
             vals, indices = tf.math.top_k(tf.math.abs(sample_tensor), k)
             thr = tf.math.reduce_min(vals)
-
             tensor_masked = tf.cast(tensor_mask, dtype=tf.float32) * tensor
             mask = tf.math.greater(tf.math.abs(tensor_masked), thr)
+
+            # fix the issue of sampling in topk
+            selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
+            elemnum = tf.cast(mask_size, dtype=tf.float32)
+
+            def body(thr, mask, selected):
+                thr = tf.cond(selected > 1.3 * elemnum * compress_ratio, lambda: 1.3 * thr, lambda: 0.7 * thr)
+                mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
+                selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
+                return thr, mask, selected
+
+            def condition(thr, mask, selected):
+                cond_a = selected > 1.3 * elemnum * compress_ratio
+                cond_b = selected < 0.7 * elemnum * compress_ratio
+                return tf.math.logical_or(cond_a, cond_b)
+
+            thr, mask, _ = tf.while_loop(condition, body, (thr, mask, selected), maximum_iterations=10)
+
             indices = tf.reshape(tf.where(mask), [-1])
             tensor_value = tf.boolean_mask(tensor, mask)
             mean = tf.reshape(tf.math.reduce_mean(tensor_value), [-1])
