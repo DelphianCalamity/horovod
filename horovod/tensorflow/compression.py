@@ -65,22 +65,6 @@ class NoneCompressor(Compressor):
         """Returns the tensor unmodified."""
         return tensor
 
-class NoneTestCompressor(Compressor):
-    """Default no-op compression."""
-
-    @staticmethod
-    def compress(tensor, params):
-        """Returns the tensor unmodified."""
-        tensorlist = tensor, tensor
-        params['tensors_size_are_same'] = True
-        return tensorlist, None
-
-    @staticmethod
-    def decompress(tensorlist, ctx, params):
-        """Returns the tensor unmodified."""
-        tensor, tensor = tensorlist
-        return tensor
-
 class FP16Compressor(Compressor):
     """Compress all floating point gradients to 16-bit."""
 
@@ -607,7 +591,7 @@ class DgcCompressor(Compressor):
             return tf.math.logical_or(cond_a, cond_b)
 
         thr, mask, _ = tf.while_loop(condition, body, (thr, mask, selected), maximum_iterations=10)
-        
+
         indices = tf.reshape(tf.where(mask), [-1])
         values = tf.boolean_mask(tensor_flatten, mask)
 
@@ -1112,6 +1096,133 @@ class SketchCompressor(Compressor):
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
+class FakeCompressor(Compressor):
+    """Default no-op compression."""
+    cache = {}
+    int8cache = {}
+    int16cache = {}
+    mean_cache = {}
+    @classmethod
+    def compress(cls, tensor, params):
+        """Returns the tensor unmodified."""
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
+
+        name = tensor.name
+
+
+        if params['compress_method'] in ['randomk']:
+            if name not in cls.cache:
+                cls.cache[name] = tf.ones([2 * elemnum], dtype=tf.float32)
+            tensor_compressed = (cls.cache[name])[: max(1, int(elemnum * compress_ratio))]
+            params['tensors_size_are_same'] = True
+
+        elif params['compress_method'] in ['topk',]:
+            if name not in cls.cache:
+                cls.cache[name] = tf.ones([2 * elemnum], dtype=tf.float32)
+            tensor_compressed = (cls.cache[name])[: 2 * max(1, int(elemnum * compress_ratio))]
+            params['tensors_size_are_same'] = True
+
+        elif params['compress_method'] in ['dgc','adas']:
+            if name not in cls.cache:
+                cls.cache[name] = tf.ones([2 * elemnum], dtype=tf.float32)
+            tensor_compressed = (cls.cache[name])[: 2 * max(1, int(elemnum * compress_ratio))]
+            params['tensors_size_are_same'] = False
+
+        elif params['compress_method'] in ['adaq',]:
+            if name not in cls.cache:
+                cls.cache[name] = tf.ones([2 * elemnum], dtype=tf.float32)
+            tensor_compressed = (cls.cache[name])[: min(elemnum, 3 + int(elemnum * compress_ratio))]
+            params['tensors_size_are_same'] = False
+
+        elif params['compress_method'] in ['signsgd', 'signum', 'natural']:
+            if name not in cls.int8cache:
+                cls.int8cache[name] = tf.ones([elemnum], dtype=tf.int8)
+            tensor_compressed = cls.int8cache[name]
+            params['tensors_size_are_same'] = True
+
+
+        elif params['compress_method'] in ['efsignsgd', 'terngrad', '8bit']:
+            if name not in cls.int8cache:
+                cls.int8cache[name] = tf.ones([elemnum], dtype=tf.int8)
+            tensor_compressed = tensor_flatten[0], cls.int8cache[name]
+            params['tensors_size_are_same'] = True
+
+        elif params['compress_method'] in ['qsgd']:
+            quantum_num = params["quantum_num"]
+
+            if quantum_num < 128:
+                if name not in cls.int8cache:
+                    cls.int8cache[name] = tf.ones([elemnum], dtype=tf.int8)
+                tensor_compressed = tensor_flatten[0], cls.int8cache[name]
+            else:
+                if name not in cls.int16cache:
+                    cls.int16cache[name] = tf.ones([elemnum], dtype=tf.int16)
+                tensor_compressed = tensor_flatten[0], cls.int16cache[name]
+            params['tensors_size_are_same'] = True
+
+        elif params['compress_method'] in ['sketch']:
+            quantum_num = params["quantum_num"]
+            if name not in cls.mean_cache:
+                cls.mean_cache[name] = tf.ones([quantum_num], dtype=tf.float32)
+            if quantum_num < 256:
+                if name not in cls.int8cache:
+                    cls.int8cache[name] = tf.ones([elemnum], dtype=tf.int8)
+                tensor_compressed = cls.mean_cache[name], cls.int8cache[name]
+            else:
+                if name not in cls.int16cache:
+                    cls.int16cache[name] = tf.ones([elemnum], dtype=tf.int16)
+                tensor_compressed = cls.mean_cache[name], cls.int16cache[name]
+            params['tensors_size_are_same'] = True
+
+        elif params['compress_method'] in ['onebit']:
+            if name not in cls.int8cache:
+                cls.int8cache[name] = tf.ones([elemnum], dtype=tf.int8)
+            tensor_compressed = tensor_flatten[:1], cls.int8cache[name]
+            params['tensors_size_are_same'] = True
+
+        elif params['compress_method'] in ['threshold']:
+            if name not in cls.cache:
+                cls.cache[name] = tf.ones([2 * elemnum], dtype=tf.float32)
+            if params['data_name'] == 'cifar10':
+                if params["threshold_val"] == 0.01:
+                    tensor_compressed = cls.cache[name][:max(1, int(0.002801085 * elemnum))]
+                elif params["threshold_val"] == 0.001:
+                    tensor_compressed = cls.cache[name][:max(1, int(0.191417873 * elemnum))]
+                elif params["threshold_val"] == 0.0001:
+                    tensor_compressed = cls.cache[name][:max(1, int(1.593330538 * elemnum))]
+                elif params["threshold_val"] == 0.00001:
+                    tensor_compressed = cls.cache[name][:max(1, int(1.95826873 * elemnum))]
+
+            elif params['data_name'] == 'imagenet':
+                if params["threshold_val"] == 0.0001:
+                    tensor_compressed = cls.cache[name][:max(1, int(1.78922153 * elemnum))]
+                elif params["threshold_val"] == 0.00001:
+                    tensor_compressed = cls.cache[name][:max(1, int(1.97886104 * elemnum))]
+            params['tensors_size_are_same'] = False
+
+        elif params['compress_method'] in ['powersgd']:
+            if name not in cls.cache:
+                cls.cache[name] = tf.ones([elemnum], dtype=tf.float32)
+            if params['data_name'] == 'cifar10':
+                temp = cls.cache[name][:max(1, int(0.691594033 * 0.5 * elemnum))]
+                tensor_compressed = temp, temp
+            elif params['data_name'] == 'imagenet':
+                temp = cls.cache[name][:max(1, int(0.637016277 * 0.5 * elemnum))]
+                tensor_compressed = temp, temp
+            params['tensors_size_are_same'] = True
+
+        ctx = tensor
+        return tensor_compressed, ctx
+
+    @classmethod
+    def decompress(cls, tensor_compressed, ctx, params):
+        """Returns the tensor unmodified."""
+        tensor_decompressed = ctx
+        return tensor_decompressed
+
 
 class Compression(object):
     """Optional gradient compression algorithm used during allreduce."""
@@ -1138,4 +1249,4 @@ class Compression(object):
     u8bit = U8bitCompressor
     natural = NaturalCompressor
     sketch = SketchCompressor
-    nonetest = NoneTestCompressor
+    fake = FakeCompressor
