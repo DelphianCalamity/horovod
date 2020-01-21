@@ -83,5 +83,5 @@ python ${EXAMPLE}
 "
 
 echo ${cmd}
-${cmd}
+eval $cmd
 
