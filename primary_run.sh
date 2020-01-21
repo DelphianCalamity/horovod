@@ -1,3 +1,5 @@
+# ./primary_run.sh -u kelly -p 12345 -e tensorflow_mnist.py -profiling-path ./
+
 #!/bin/bash
 
 POSITIONAL=()
@@ -52,7 +54,7 @@ cmd=\
 "
 docker run --rm -it --name ${USER} --runtime=nvidia \
 --network=host --privileged \
--v /home/ubuntu/${USER}:/home/ubuntu/ \
+-v /home/ubuntu/:/home/ubuntu/${USER}\
 -v /mnt/scratch:/mnt/scratch \
 -v /home/ubuntu/.ssh/shared:/root/.ssh \
 -v /sys/bus/pci/drivers:/sys/bus/pci/drivers \
@@ -74,7 +76,7 @@ mpirun \
 -np 2 -H 10.0.0.131:1,10.0.0.132:1 \
 ${profiling} \
 --display-map --display-allocation -map-by slot -bind-to none -nooversubscribe -mca plm_rsh_args \
--p ${PORT}\
+-p ${PORT} \
 --mca pml ob1 --mca btl ^openib --mca btl_tcp_if_exclude docker0,eno2,ens4f0,ens4f1,lo,virbr0,ib0,ib1, \
 --tag-output \
 python ${EXAMPLE}
