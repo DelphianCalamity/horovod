@@ -1,3 +1,4 @@
+# ./secondary_run.sh -u kelly -p 23265
 
 #!/bin/bash
 
