@@ -33,6 +33,8 @@ from horovod.tensorflow.mpi_ops import gloo_enabled, gloo_built
 from horovod.tensorflow.mpi_ops import nccl_built, ddl_built, mlsl_built
 from horovod.tensorflow.util import _executing_eagerly, _make_subgraph, _cache
 
+from distutils.util import strtobool
+
 import tensorflow as tf
 import math
 import json
@@ -65,18 +67,18 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         params = {
             "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
             "comm_method": os.environ.get('HOROVOD_COMM_METHOD', 'allreduce'),
-            "use_memory": True if os.environ.get('HOROVOD_USE_MEMORY', False) else False,
+            "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
             "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
             "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
             "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
-            "gradient_clipping": True if os.environ.get('HOROVOD_GRADIENT_CLIPPING', False) else False,
+            "gradient_clipping": strtobool(os.environ.get('HOROVOD_GRADIENT_CLIPPING', "False")),
             "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
             "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
-            "debug": True if os.environ.get('HOROVOD_DEBUG', False) else False,
+            "debug": strtobool(os.environ.get('HOROVOD_DEBUG', "False")),
             "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
             "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 0)),
             'data_name': os.environ.get('HOROVOD_DATA_NAME', 'cifar10'),
-            'compress_state': os.environ.get('HOROVOD_COMPRESS_STATE', 'True')
+            'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True'))
         }
 
 
@@ -100,7 +102,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["natural"] = Compression.natural
     comp_dict["sketch"] = Compression.sketch
     # testing
-    if params['compress_state'] == 'False':
+    if not params['compress_state']:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
                        'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch']:
             comp_dict[method] = Compression.fake
