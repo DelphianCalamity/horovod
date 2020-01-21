@@ -37,7 +37,7 @@ cmd=\
 "
 docker run --rm -it --name ${USER} --runtime=nvidia --network=host --privileged \
 -v /data/scratch/:/data/scratch/ \
--v /home/ubuntu/:/home/ubuntu/${USER} \
+-v /home/ubuntu/${USER}:/home/ubuntu/${USER} \
 -v /mnt/scratch:/mnt/scratch \
 -v /home/ubuntu/.ssh/shared:/root/.ssh \
 -v /sys/bus/pci/drivers:/sys/bus/pci/drivers \
