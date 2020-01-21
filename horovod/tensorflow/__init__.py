@@ -98,7 +98,10 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["natural"] = Compression.natural
     comp_dict["sketch"] = Compression.sketch
     # testing
-    comp_dict["nonetest"] = Compression.nonetest
+    if params['compress_state'] == False:
+        for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
+                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch']:
+            comp_dict[method] = Compression.fake
 
     default_params = {}
     default_params["compress_method"] = 'none'
