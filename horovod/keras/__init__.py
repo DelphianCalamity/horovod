@@ -34,7 +34,7 @@ import horovod._keras as _impl
 def DistributedOptimizer(optimizer, name=None,
                          device_dense='', device_sparse='',
                          compression=Compression.none,
-                         sparse_as_dense=False):
+                         sparse_as_dense=False, params=None):
     """
     An optimizer that wraps another keras.optimizers.Optimizer, using an allreduce to
     average gradient values before applying gradients to model weights.
@@ -58,7 +58,7 @@ def DistributedOptimizer(optimizer, name=None,
     """
     return _impl.create_distributed_optimizer(keras, optimizer, name,
                                               device_dense, device_sparse, compression,
-                                              sparse_as_dense)
+                                              sparse_as_dense, params)
 
 
 def broadcast_global_variables(root_rank):
