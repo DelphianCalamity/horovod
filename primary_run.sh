@@ -66,7 +66,7 @@ docker run --rm -it --name ${USER} --runtime=nvidia \
 kelkost/horovod:bloom-filter \
 mpirun \
 -x CUDA_VISIBLE_DEVICES=1 --allow-run-as-root \
--wdir /home/ubuntu/kelly/ \
+-wdir /home/ubuntu/${USER}/ \
 --mca orte_base_help_aggregate 0 \
 -x NCCL_IB_DISABLE=1 \
 -x NCCL_SOCKET_IFNAME=enp1s0f1 \
