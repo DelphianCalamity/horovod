@@ -45,7 +45,8 @@ docker run --rm -it --name ${USER} --runtime=nvidia --network=host --privileged 
 -v /lib/modules:/lib/modules \
 -w /home/ubuntu/${USER} \
 kelkost/horovod:bloom-filter \
-bash -c '/usr/sbin/sshd -p ${PORT}; sleep infinity'
+bash -c \"/usr/sbin/sshd -p ${PORT}; sleep infinity\"
 "
-echo ${cmd}
-${cmd}
+
+echo "${cmd}"
+eval $cmd
