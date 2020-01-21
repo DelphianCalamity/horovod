@@ -74,7 +74,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
             "debug": True if os.environ.get('HOROVOD_DEBUG', False) else False,
             "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
-            "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 0))
+            "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 0)),
+            'data_name': os.environ.get('HOROVOD_DATA_NAME', 'cifar10'),
+            'compress_state': os.environ.get('HOROVOD_COMPRESS_STATE', 'True')
         }
 
 
@@ -98,7 +100,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["natural"] = Compression.natural
     comp_dict["sketch"] = Compression.sketch
     # testing
-    if params['compress_state'] == False:
+    if params['compress_state'] == 'False':
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
                        'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch']:
             comp_dict[method] = Compression.fake
