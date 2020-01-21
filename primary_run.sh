@@ -1,4 +1,4 @@
-# ./primary_run.sh -u kelly -p 12345 -e tensorflow_mnist.py -profiling-path ./
+# ./primary_run.sh -u kelly -p 12345 -e examples/tensorflow_mnist.py -pp ./
 
 #!/bin/bash
 
@@ -54,7 +54,7 @@ cmd=\
 "
 docker run --rm -it --name ${USER} --runtime=nvidia \
 --network=host --privileged \
--v /home/ubuntu/:/home/ubuntu/${USER}\
+-v /home/ubuntu/:/home/ubuntu/${USER} \
 -v /mnt/scratch:/mnt/scratch \
 -v /home/ubuntu/.ssh/shared:/root/.ssh \
 -v /sys/bus/pci/drivers:/sys/bus/pci/drivers \
