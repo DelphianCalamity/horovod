@@ -14,7 +14,6 @@
 # limitations under the License.
 # ==============================================================================
 # pylint: disable=g-short-docstring-punctuation
-# horovod version: v0.18.1
 
 from __future__ import absolute_import
 from __future__ import division
@@ -43,23 +42,27 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                    ):
     """Perform an allreduce on a tf.Tensor or tf.IndexedSlices.
 
-    Arguments:
-        tensor: tf.Tensor, tf.Variable, or tf.IndexedSlices to reduce.
-        The shape of the input must be identical across all ranks.
-        average: If True, computes the average over all ranks.
-                 Otherwise, computes the sum over all ranks.
-        device_dense: Device to be used for dense tensors. Uses GPU by default
-                      if Horovod was build with HOROVOD_GPU_ALLREDUCE.
-        device_sparse: Device to be used for sparse tensors. Uses GPU by default
-                       if Horovod was build with HOROVOD_GPU_ALLGATHER.
-        compression: Compression algorithm used to reduce the amount of data
-                     sent and received by each worker node.  Defaults to not
-                     using compression.
-
     This function performs a bandwidth-optimal ring allreduce on the input
     tensor. If the input is an tf.IndexedSlices, the function instead does an
     allgather on the values and the indices, effectively doing an allreduce on
     the represented tensor.
+
+    Arguments:
+        tensor: tf.Tensor, tf.Variable, or tf.IndexedSlices to reduce.
+                The shape of the input must be identical across all ranks.
+        average: If True, computes the average over all ranks.
+                 Otherwise, computes the sum over all ranks.
+        device_dense: Device to be used for dense tensors. Uses GPU by default
+                      if Horovod was built with HOROVOD_GPU_ALLREDUCE.
+        device_sparse: Device to be used for sparse tensors. Uses GPU by default
+                       if Horovod was built with HOROVOD_GPU_ALLGATHER.
+        compression: Compression algorithm used to reduce the amount of data
+                     sent and received by each worker node.  Defaults to not
+                     using compression.
+
+    Returns:
+        A tensor of the same shape and type as `tensor`, summed across all
+        processes.
     """
 
     comp_dict = {}
@@ -128,12 +131,12 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     # print(params)
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
-            # For IndexedSlices, do two allgathers intead of an allreduce.
+            # For IndexedSlices, do two allgathers instead of an allreduce.
             horovod_size = tf.cast(size(), tensor.values.dtype)
             values = allgather(tensor.values)
             indices = allgather(tensor.indices)
 
-            # To make this operation into an average, divide all gathered values by
+            # To make this operation into an average, divide allgathered values by
             # the Horovod size.
             new_values = (values / horovod_size) if average else values
         return tf.IndexedSlices(new_values, indices,
@@ -168,7 +171,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                 tensors_ag = {}
                 new_tensors = defaultdict(list)
                 num = len(tensors)
-                for i in range(len(tensors)):
+                for i in range(num):
                     tensors_size.append(tf.reshape(tf.size(tensors[i]), [-1]))
                     tensors_shape[i] = tf.shape(tensors[i])
                     tensors_1d[i] = tf.reshape(tensors[i], [-1])
@@ -193,7 +196,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                 index_b = {}
                 for ranki in range(size()):
                     tensors_size = tensors_size_ag[num * ranki:num * (ranki+1)]
-                    for i in range(len(tensors)):
+                    for i in range(num):
                         index_b[i] = index_a[i] + tensors_size[i]
                         new_tensors[ranki].append(tf.reshape(tensors_ag[i][index_a[i]:index_b[i]], tensors_shape[i]))
                         index_a[i] = index_b[i]
@@ -274,6 +277,7 @@ def _make_broadcast_group_fn():
 
 def broadcast_variables(variables, root_rank):
     """Broadcasts variables from root rank to all other processes.
+
     Arguments:
         variables: variables for broadcast
         root_rank: rank of the process from which global variables will be broadcasted
@@ -294,7 +298,9 @@ except AttributeError:
 if _global_variables is not None:
     def broadcast_global_variables(root_rank):
         """Broadcasts all global variables from root rank to all other processes.
+
         **NOTE:** deprecated in TensorFlow 2.0.
+
         Arguments:
             root_rank: rank of the process from which global variables will be broadcasted
                        to all other processes.
@@ -328,14 +334,17 @@ if _SessionRunHook is not None and _get_default_graph is not None:
         """
         SessionRunHook that will broadcast all global variables from root rank
         to all other processes during initialization.
+
         This is necessary to ensure consistent initialization of all workers when
         training is started with random weights or restored from a checkpoint.
+
         **NOTE:** deprecated in TensorFlow 2.0.
         """
 
         def __init__(self, root_rank, device=''):
             """Construct a new BroadcastGlobalVariablesHook that will broadcast all
             global variables from root rank to all other processes during initialization.
+
             Args:
               root_rank:
                 Rank that will send data, other ranks will receive data.
@@ -412,7 +421,9 @@ if _LegacyOptimizer is not None:
 
         def compute_gradients(self, *args, **kwargs):
             """Compute gradients of all trainable variables.
+
             See Optimizer.compute_gradients() for more info.
+
             In DistributedOptimizer, compute_gradients() is overriden to also
             allreduce the gradients before returning them.
             """
@@ -448,6 +459,7 @@ def DistributedOptimizer(optimizer, name=None, use_locking=False, device_dense='
     under the hood for computing single-process gradient values and
     applying gradient updates after the gradient values have been averaged
     across all the Horovod ranks.
+
     Args:
       optimizer:
         Optimizer to use for computing gradients and applying updates.
@@ -513,6 +525,7 @@ if hasattr(tf, 'GradientTape'):
                                 compression=Compression.none, sparse_as_dense=False, params=None):
         """A tape that wraps another tf.GradientTape, using an allreduce to
         average gradient values before applying gradients to model weights.
+
         Args:
           gradtape:
             GradientTape to use for computing gradients and applying updates.
