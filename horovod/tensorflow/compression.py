@@ -50,6 +50,7 @@ class Compressor(object):
         agged_tensor = (agged_tensor / horovod_size) if average else agged_tensor
         return agged_tensor
 
+
 class NoneCompressor(Compressor):
     """Default no-op compression."""
 
@@ -63,6 +64,7 @@ class NoneCompressor(Compressor):
     def decompress(tensor, ctx, params):
         """Returns the tensor unmodified."""
         return tensor
+
 
 class FP16Compressor(Compressor):
     """Compress all floating point gradients to 16-bit."""
@@ -159,6 +161,46 @@ class TopKCompressor(Compressor):
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
+class Bloom_Filter_TopKCompressor(Compressor):
+    """"""
+    @staticmethod
+    def compress(tensor, params):
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])           # [1.,3.,2.,4.]
+        elemnum = tensor_flatten.get_shape().as_list()[0]   # 4
+        compress_ratio = params["compress_ratio"]
+
+        k = max(1, int(elemnum * compress_ratio))
+
+        # file = open(“logs.txt”, ”w”)
+        # sess = tf.Session()
+        # file.write(sess.run()
+        # sess.close()
+        # print("Topk - K Value:", k)
+
+        b = tf.Print(k, [k], message="\n\n\nK Value:\n\n\n")
+        c = tf.add(k,b)
+
+        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k)   # [1,3]
+        values = tf.gather(tensor_flatten, indices)                  # [3.,4.]
+        values = tf.bitcast(values, tf.int32)                        # [3,4]
+        tensor_compressed = tf.concat([values, indices], 0)
+        ctx = tensor_shape
+        params['tensors_size_are_same'] = True
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+        """Decompress by filling empty slots with zeros and reshape back using the original shape"""
+        values, indices = tf.split(tensor_compressed, 2)
+        values = tf.bitcast(values, tf.float32)
+        tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 class ThresholdCompressor(Compressor):
     """"""
@@ -220,6 +262,7 @@ class SignSGDCompressor(Compressor):
         sign_decode = tf.cast(sign_encode, dtype=tf.float32) * 2.0 - 1.0
         tensor_decompressed = tf.reshape(sign_decode, tensor_shape)
         return tensor_decompressed
+
 
 class EFSignSGDCompressor(Compressor):
     """"""
@@ -514,6 +557,7 @@ class TerngradCompressor(Compressor):
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
+
 class DgcCompressor(Compressor):
     """"""
 
@@ -609,7 +653,6 @@ class DgcCompressor(Compressor):
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
-
 
 
 class AdaqCompressor(Compressor):
@@ -1085,6 +1128,7 @@ class SketchCompressor(Compressor):
         tensor_decompressed = tf.gather(means, bins)
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
+
 
 class FakeCompressor(Compressor):
     """Default no-op compression."""
