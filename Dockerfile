@@ -6,7 +6,7 @@ ENV PYTORCH_VERSION=1.2.0
 ENV TORCHVISION_VERSION=0.4.0
 ENV CUDNN_VERSION=7.6.0.64-1+cuda10.0
 ENV NCCL_VERSION=2.4.7-1+cuda10.0
-ENV MXNET_VERSION=1.5.0
+#ENV MXNET_VERSION=1.5.0
 
 # Python 2.7 or 3.6 is supported by Ubuntu Bionic out of the box
 ARG python=2.7
@@ -52,7 +52,7 @@ RUN pip install numpy \
         h5py
 RUN pip install https://download.pytorch.org/whl/cu100/torch-${PYTORCH_VERSION}-$(python -c "import wheel.pep425tags as w; print('-'.join(w.get_supported()[0][:-1]))")-manylinux1_x86_64.whl \
         https://download.pytorch.org/whl/cu100/torchvision-${TORCHVISION_VERSION}-$(python -c "import wheel.pep425tags as w; print('-'.join(w.get_supported()[0][:-1]))")-manylinux1_x86_64.whl
-RUN pip install mxnet-cu100==${MXNET_VERSION}
+#RUN pip install mxnet-cu100==${MXNET_VERSION}
 
 # Install Open MPI
 RUN mkdir /tmp/openmpi && \
