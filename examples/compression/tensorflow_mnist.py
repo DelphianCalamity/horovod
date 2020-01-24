@@ -80,7 +80,7 @@ def main(_):
 
     params = {}
     params["compress_method"] = "Bloom_Filter_TopKCompressor"
-
+    params['compress_state'] = True
     # Horovod: initialize Horovod.
     hvd.init()
 

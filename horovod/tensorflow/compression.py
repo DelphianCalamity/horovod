@@ -172,13 +172,6 @@ class Bloom_Filter_TopKCompressor(Compressor):
         compress_ratio = params["compress_ratio"]
 
         k = max(1, int(elemnum * compress_ratio))
-
-        # file = open(“logs.txt”, ”w”)
-        # sess = tf.Session()
-        # file.write(sess.run()
-        # sess.close()
-        # print("Topk - K Value:", k)
-
         b = tf.Print(k, [k], message="\n\n\nK Value:\n\n\n")
         c = tf.add(k,b)
 
@@ -1284,3 +1277,4 @@ class Compression(object):
     natural = NaturalCompressor
     sketch = SketchCompressor
     fake = FakeCompressor
+    Bloom_Filter_TopKCompressor = Bloom_Filter_TopKCompressor
