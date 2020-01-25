@@ -76,7 +76,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
             "debug": strtobool(os.environ.get('HOROVOD_DEBUG', "False")),
             "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
-            "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 0)),
+            "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
             'data_name': os.environ.get('HOROVOD_DATA_NAME', 'cifar10'),
             'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True'))
         }
