@@ -165,78 +165,64 @@ class TopKCompressor(Compressor):
 
 class BloomFilter():
 
-    def __init__(self):
-        self.bloom = tf.TensorArray(
-            tf.int32,
-            size=0,
-            dynamic_size=True,
-            clear_after_read=False,
-            infer_shape=False)
-
-    def h1(self, i):
+    @staticmethod
+    def h1(i):
         return i
 
-    def build(self):
+    @staticmethod
+    def build(indices, bloom_size):
 
-        # def embed_word(word_index):
-        #     return tf.expand_dims(tf.gather(self.embeddings, word_index), 0)
-        #
-        # def combine_children(left_tensor, right_tensor):
-        #     return tf.nn.relu(tf.matmul(tf.concat([left_tensor, right_tensor], 1), W1) + b1)
-        # node_is_leaf = tf.gather(self.is_leaf_placeholder, i)
-        # node_word_index = tf.gather(self.node_word_indices_placeholder, i)
-        # left_child = tf.gather(self.left_children_placeholder, i)
-        # right_child = tf.gather(self.right_children_placeholder, i)
-        # print(left_child, "left_child")
-        # node_tensor = tf.cond(
-        #     node_is_leaf,
-        #     lambda: embed_word(node_word_index),
-        #     lambda: combine_children(tensor_array.read(left_child),
-        #                              tensor_array.read(right_child)))
+        bloom = tf.TensorArray(
+            tf.int32,
+            size=bloom_size,
+            clear_after_read=False,
+            infer_shape=True)
 
-        def loop_body(bloom, i):
-            self.bloom = self.bloom.write(self.h1(i), 1)
+        def loop_body(bloom, indices, i):
+            index = tf.gather(indices, i)
+            bloom = bloom.write(BloomFilter().h1(index), 1)
             i = tf.add(i, 1)
-            return self.bloom
+            return bloom, indices, i
 
-        loop_cond = lambda indices_array, i: tf.less(i, tf.squeeze(tf.shape(indices_array)))
-        self.bloom = tf.while_loop(loop_cond, loop_body, [self.bloom, 0], parallel_iterations=1)
+        loop_cond = lambda bloom, indices, i: tf.less(i, tf.squeeze(tf.shape(indices)))
+        bloom, _, _ = tf.while_loop(loop_cond, loop_body, [bloom, indices, 0], parallel_iterations=1)
 
-    def check(self):
-        pass
+        return bloom
+
+    @staticmethod
+    def check(bloom, i):
+        ret = bloom.read(BloomFilter().h1(i))
+        return h1(i)
+
+
+
 
 
 
 class Bloom_Filter_TopKCompressor(Compressor):
     """"""
+
     @staticmethod
     def compress(tensor, params):
 
         tensor_shape = tf.shape(tensor)
-        tensor_flatten = tf.reshape(tensor, [-1])           # [1.,3.,2.,4.]
-        elemnum = tensor_flatten.get_shape().as_list()[0]   # 4
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
+        bloom_size = params["bloom_size"]
+
         compress_ratio = params["compress_ratio"]
-
         k = max(1, int(elemnum * compress_ratio))
-        # b = tf.Print(k, [k], message="\n\n\nK Value:\n\n\n")
-        # c = tf.add(k,b)
+        params['values_size'] = k   # dirty hack
 
-        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k)   # [1,3]
-        values = tf.gather(tensor_flatten, indices)                  # [3.,4.]
-        values = tf.bitcast(values, tf.int32)                        # [3,4]
+        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k)
+        values = tf.gather(tensor_flatten, indices)
+        values = tf.bitcast(values, tf.int32)
 
+        bloom = BloomFilter().build(indices, bloom_size)
+        packed_bloom = bloom.stack()
+        # print("Bloom: ", sess.run(packed_bloom))
 
-
-
-
-
-
-
-
-
-
-
-        tensor_compressed = tf.concat([values, indices], 0)
+        tensor_compressed = tf.concat([values, packed_bloom], 0)
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
         return tensor_compressed, ctx
@@ -244,10 +230,39 @@ class Bloom_Filter_TopKCompressor(Compressor):
     @staticmethod
     def decompress(tensor_compressed, ctx, params):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
-        values, indices = tf.split(tensor_compressed, 2)
+        values_size = params['values_size']
+        bloom_size = params['bloom_size ']
+        values, bloom = tf.split(tensor_compressed, [values_size, bloom_size])
         values = tf.bitcast(values, tf.float32)
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
+
+        tensor_compressed = tf.TensorArray(
+            tf.float32,
+            size=tensor_size,
+            clear_after_read=False,
+            infer_shape=True)
+
+        def loop_body(bloom, i):
+            BloomFilter().check(bloom, i)
+
+
+            bloom = bloom.write(BloomFilter().h1(index), 1)
+            i = tf.add(i, 1)
+            return bloom, indices, i
+
+        loop_cond = lambda bloom, i: tf.less(i, tensor_size)
+        ret, _ = tf.while_loop(loop_cond, loop_body, [bloom, 0], parallel_iterations=1)
+
+
+
+
+
+
+
+
+
+
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
