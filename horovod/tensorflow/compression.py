@@ -162,7 +162,6 @@ class TopKCompressor(Compressor):
         return tensor_decompressed
 
 
-
 class BloomFilter():
 
     @staticmethod
@@ -191,12 +190,7 @@ class BloomFilter():
 
     @staticmethod
     def check(bloom, i):
-        ret = bloom.read(BloomFilter().h1(i))
-        return h1(i)
-
-
-
-
+        return tf.gather(bloom, BloomFilter().h1(i))
 
 
 class Bloom_Filter_TopKCompressor(Compressor):
@@ -233,39 +227,35 @@ class Bloom_Filter_TopKCompressor(Compressor):
         values_size = params['values_size']
         bloom_size = params['bloom_size ']
         values, bloom = tf.split(tensor_compressed, [values_size, bloom_size])
-        values = tf.bitcast(values, tf.float32)
+        # values = tf.bitcast(values, tf.float32)
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
         tensor_compressed = tf.TensorArray(
-            tf.float32,
+            tf.int32,
             size=tensor_size,
             clear_after_read=False,
             infer_shape=True)
 
-        def loop_body(bloom, i):
-            BloomFilter().check(bloom, i)
+        def loop_body(bloom, tensor_compressed, i, values, j):
+            exists = BloomFilter().check(bloom, i)
 
+            val, j = tf.cond(tf.equal(exists, 1),
+                             lambda: (tf.gather(values, j), tf.add(j, 1)),
+                             lambda: (0, j))
+            tensor_compressed = tensor_compressed.write(i, val)
 
-            bloom = bloom.write(BloomFilter().h1(index), 1)
             i = tf.add(i, 1)
-            return bloom, indices, i
+            return bloom, tensor_compressed, i, values, j
 
-        loop_cond = lambda bloom, i: tf.less(i, tensor_size)
-        ret, _ = tf.while_loop(loop_cond, loop_body, [bloom, 0], parallel_iterations=1)
+        loop_cond = lambda bloom, tensor_compressed, i, values, j: tf.less(i, tensor_size)
+        _, tensor_decompressed_array, _, _, _ = tf.while_loop(loop_cond, loop_body, [bloom, tensor_compressed, 0, values, 0],
+                                                        parallel_iterations=1)
 
+        packed_tensor_decompressed = tensor_decompressed_array.stack()
+        # print("tensor decompressed: ", sess.run(packed_tensor_decompressed))
 
-
-
-
-
-
-
-
-
-        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
-        tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
-        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        tensor_decompressed = tf.reshape(packed_tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
 
