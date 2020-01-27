@@ -19,6 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import argparse
 import errno
 import numpy as np
 import tensorflow as tf
@@ -28,14 +29,35 @@ from tensorflow import keras
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
+def make_args_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-cm",
+        "--compress_method",
+        default="none",
+        help="Compression Method",
+    )
+    parser.add_argument(
+        '-cs',
+        '--compress_state',
+        action='store_true',
+        default=False,
+        help="compression or not")
 
-def cnn_model_fn(features, labels, mode):
+    # parser.add_argument(
+    #     "-e", "--episodes", type=int, default=800, help="Number of episodes"
+    # )
+
+    return parser.parse_args()
+
+
+def cnn_model_fn(features, labels, mode, params):
     """Model function for CNN."""
 
-    params = {}
+    # params = {}
     # params['compress_method'] = "bloom_topk"
-    params['compress_method'] = "topk"
-    params['compress_state'] = True
+    # # params['compress_method'] = "topk"
+    # params['compress_state'] = True
     # params['bloom_size'] = 1500
 
     # Input Layer
@@ -139,6 +161,14 @@ def cnn_model_fn(features, labels, mode):
 
 
 def main(unused_argv):
+
+    args = make_args_parser()
+
+    params = {}
+    params['compress_method'] = args.compress_method #"bloom_topk"
+    params['compress_state'] = args.compress_state #True
+    # params['compress_state'] = True
+
     # Horovod: initialize Horovod.
     hvd.init()
 
@@ -178,7 +208,7 @@ def main(unused_argv):
 
     # Create the Estimator
     mnist_classifier = tf.estimator.Estimator(
-        model_fn=cnn_model_fn, model_dir=model_dir,
+        model_fn=cnn_model_fn, params=params, model_dir=model_dir,
         config=tf.estimator.RunConfig(session_config=config))
 
     # Set up logging for predictions
