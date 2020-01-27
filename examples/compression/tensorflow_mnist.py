@@ -79,8 +79,11 @@ def train_input_generator(x_train, y_train, batch_size=64):
 def main(_):
 
     params = {}
-    params["compress_method"] = "Bloom_Filter_TopKCompressor"
+    # params['compress_method'] = "Bloom_Filter_TopKCompressor"
+    params['compress_method'] = "TopKCompressor"
     params['compress_state'] = True
+    # params['bloom_size'] = 1500
+
     # Horovod: initialize Horovod.
     hvd.init()
 

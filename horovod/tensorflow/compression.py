@@ -1,7 +1,7 @@
 """Gradient compression algorithms."""
 
 import tensorflow as tf
-import random, math
+import random, math #, mmh3
 from horovod.tensorflow.mpi_ops import _allreduce
 
 
@@ -165,8 +165,10 @@ class TopKCompressor(Compressor):
 class BloomFilter():
 
     @staticmethod
-    def h1(i):
-        return i
+    def h1(i, bloom_size):
+        # r = mmh3.hash(i, 42) % bloom_size  # temporary seed
+        r = i % bloom_size
+        return r
 
     @staticmethod
     def build(indices, bloom_size):
@@ -177,20 +179,20 @@ class BloomFilter():
             clear_after_read=False,
             infer_shape=True)
 
-        def loop_body(bloom, indices, i):
+        def loop_body(bloom, indices, i, bloom_size):
             index = tf.gather(indices, i)
-            bloom = bloom.write(BloomFilter().h1(index), 1)
+            bloom = bloom.write(BloomFilter().h1(index, bloom_size), 1)
             i = tf.add(i, 1)
-            return bloom, indices, i
+            return bloom, indices, i, bloom_size
 
-        loop_cond = lambda bloom, indices, i: tf.less(i, tf.squeeze(tf.shape(indices)))
-        bloom, _, _ = tf.while_loop(loop_cond, loop_body, [bloom, indices, 0], parallel_iterations=1)
+        loop_cond = lambda bloom, indices, i, bloom_size: tf.less(i, tf.squeeze(tf.shape(indices)))
+        bloom, _, _, _ = tf.while_loop(loop_cond, loop_body, [bloom, indices, 0, bloom_size], parallel_iterations=1)
 
         return bloom
 
     @staticmethod
-    def check(bloom, i):
-        return tf.gather(bloom, BloomFilter().h1(i))
+    def check(bloom, i, bloom_size):
+        return tf.gather(bloom, BloomFilter().h1(i, bloom_size))
 
 
 class Bloom_Filter_TopKCompressor(Compressor):
@@ -227,34 +229,33 @@ class Bloom_Filter_TopKCompressor(Compressor):
         values_size = params['values_size']
         bloom_size = params['bloom_size ']
         values, bloom = tf.split(tensor_compressed, [values_size, bloom_size])
-        # values = tf.bitcast(values, tf.float32)
+        values = tf.bitcast(values, tf.float32)
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
         tensor_compressed = tf.TensorArray(
-            tf.int32,
+            tf.float32,
             size=tensor_size,
             clear_after_read=False,
             infer_shape=True)
 
-        def loop_body(bloom, tensor_compressed, i, values, j):
-            exists = BloomFilter().check(bloom, i)
+        def loop_body(bloom, tensor_compressed, i, values, j, bloom_size):
+            exists = BloomFilter().check(bloom, i, bloom_size)
 
             val, j = tf.cond(tf.equal(exists, 1),
                              lambda: (tf.gather(values, j), tf.add(j, 1)),
-                             lambda: (0, j))
+                             lambda: (0., j))
             tensor_compressed = tensor_compressed.write(i, val)
 
             i = tf.add(i, 1)
-            return bloom, tensor_compressed, i, values, j
+            return bloom, tensor_compressed, i, values, j, bloom_size
 
-        loop_cond = lambda bloom, tensor_compressed, i, values, j: tf.less(i, tensor_size)
-        _, tensor_decompressed_array, _, _, _ = tf.while_loop(loop_cond, loop_body, [bloom, tensor_compressed, 0, values, 0],
+        loop_cond = lambda bloom, tensor_compressed, i, values, j, bloom_size: tf.less(i, tensor_size)
+        _, tensor_decompressed_array, _, _, _, _ = tf.while_loop(loop_cond, loop_body, [bloom, tensor_compressed, 0, values, 0, bloom_size],
                                                         parallel_iterations=1)
 
         packed_tensor_decompressed = tensor_decompressed_array.stack()
         # print("tensor decompressed: ", sess.run(packed_tensor_decompressed))
-
         tensor_decompressed = tf.reshape(packed_tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
