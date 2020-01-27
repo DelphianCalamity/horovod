@@ -49,6 +49,7 @@ def make_args_parser():
         default=1000,
         help="size of the bloom filter",
     )
+    return parser.parse_args()
 
 
 def conv_model(feature, target, mode):
