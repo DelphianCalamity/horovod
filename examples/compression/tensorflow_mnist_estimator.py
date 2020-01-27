@@ -43,6 +43,13 @@ def make_args_parser():
         action='store_true',
         default=False,
         help="compression or not")
+    parser.add_argument(
+        "-bs",
+        "--bloom_size",
+        type=int,
+        default=1000,
+        help="size of the bloom filter",
+    )
 
     # parser.add_argument(
     #     "-e", "--episodes", type=int, default=800, help="Number of episodes"
@@ -167,6 +174,7 @@ def main(unused_argv):
     params = {}
     params['compress_method'] = args.compress_method #"bloom_topk"
     params['compress_state'] = args.compress_state #True
+    params['bloom_size'] = args.bloom_size
     # params['compress_state'] = True
 
     # Horovod: initialize Horovod.

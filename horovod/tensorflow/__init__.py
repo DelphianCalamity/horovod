@@ -129,7 +129,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
 
-    # print(params)
+    print("\n\nParams\n\n", params)
+
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
             # For IndexedSlices, do two allgathers instead of an allreduce.

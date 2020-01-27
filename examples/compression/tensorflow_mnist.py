@@ -26,6 +26,29 @@ layers = tf.layers
 tf.logging.set_verbosity(tf.logging.INFO)
 
 
+def make_args_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-cm",
+        "--compress_method",
+        default="none",
+        help="Compression Method",
+    )
+    parser.add_argument(
+        '-cs',
+        '--compress_state',
+        action='store_true',
+        default=False,
+        help="compression or not")
+    parser.add_argument(
+        "-bs",
+        "--bloom_size",
+        type=int,
+        default=1000,
+        help="size of the bloom filter",
+    )
+
+
 def conv_model(feature, target, mode):
     """2-layer convolution model."""
     # Convert the target to a one-hot tensor of shape (batch_size, 10) and
@@ -78,11 +101,12 @@ def train_input_generator(x_train, y_train, batch_size=64):
 
 def main(_):
 
+    args = make_args_parser()
+
     params = {}
-    # params['compress_method'] = "bloom_topk"
-    # params['compress_method'] = "topk"
-    params['compress_state'] = False
-    # params['bloom_size'] = 1500
+    params['compress_method'] = args.compress_method #"bloom_topk"
+    params['compress_state'] = args.compress_state #True
+    params['bloom_size'] = args.bloom_size
 
     # Horovod: initialize Horovod.
     hvd.init()
