@@ -84,11 +84,11 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     comp_dict["8bit"] = Compression.u8bit
     comp_dict["natural"] = Compression.natural
     comp_dict["sketch"] = Compression.sketch
-    comp_dict["Bloom_Filter_TopKCompressor"] = Compression.Bloom_Filter_TopKCompressor
+    comp_dict["bloom_topk"] = Compression.bloom_topk
     # testing
     if params['compress_state'] == False:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
-                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch', 'Bloom_Filter_TopKCompressor']:
+                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch', 'bloom_topk']:
             comp_dict[method] = Compression.fake
 
     default_params = {}
@@ -120,13 +120,6 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     for argument in default_params:
         if argument not in params:
             params[argument] = default_params[argument]
-
-    ###################################
-    print("\n\nParameters:", params)
-    print("\n\n")
-    import time
-    time.sleep(5)
-    ###################################
 
     params["compressor"] = comp_dict[params["compress_method"]]
     comm_method = params["comm_method"]

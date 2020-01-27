@@ -1342,4 +1342,4 @@ class Compression(object):
     natural = NaturalCompressor
     sketch = SketchCompressor
     fake = FakeCompressor
-    Bloom_Filter_TopKCompressor = Bloom_Filter_TopKCompressor
+    bloom_topk = Bloom_Filter_TopKCompressor
