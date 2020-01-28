@@ -29,18 +29,18 @@ class Compressor(object):
         gamma = params['gamma']
         if use_memory:
             name = tensor.name
-            if name in cls.residuals:
-                tensor = beta * cls.residuals[name] + gamma * tensor
+            cls.residuals[tensor.name] = tf.Variable(tf.zeros_like(tensor))
+            tensor = beta * cls.residuals[name] + gamma * tensor
         return tensor
 
     @classmethod
-    def memory_update(cls, tensor, tensor_compressed, ctx, params):
+    def memory_update(cls, tensor, tensor_compensate, tensor_compressed, ctx, params):
         """Update the residuals."""
         use_memory = params['use_memory']
-        if use_memory:
-            name = tensor.name
-            tensor_decompressed = cls.decompress(tensor_compressed, ctx, params)
-            cls.residuals[name] = tensor - tensor_decompressed
+        name = tensor.name
+        tensor_decompressed = cls.decompress(tensor_compressed, ctx, params)
+        delta = tensor_compensate - tensor_decompressed
+        return cls.residuals[name].assign(delta) if use_memory else []
 
     @staticmethod
     def aggregate(tensors, params):

@@ -78,7 +78,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
             "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
             'data_name': os.environ.get('HOROVOD_DATA_NAME', 'cifar10'),
-            'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True'))
+            'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True')),
+            'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False'))
         }
 
 
@@ -145,7 +146,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
 
-    # print(params)
+    print("========================== print params ====================================")
+    print(params)
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
             # For IndexedSlices, do two allgathers intead of an allreduce.
@@ -240,26 +242,26 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             communicate['allgather'] = Allgather
             communicate['broadcast'] = Broadcast
 
-            tensor = compression.memory_compensate(tensor, params)
+            tensor_compensate = compression.memory_compensate(tensor, params)
+            if params['memory_debug']:
+                tensor_compensate = tf.cond(tf.train.get_global_step() < 3,
+                                            lambda: tf.Print(tensor_compensate, [tf.train.get_global_step(),
+                                                    tf.reduce_sum(tensor_compensate - tensor)],
+                                                    message="==Debug== tensor_compensate - tensor:")
+                                            , lambda: tensor_compensate)
+            tensor_compressed, ctx = compression.compress(tensor_compensate, params)
 
-            # with tf.device(params['compression_device']):
-            tensor_compressed, ctx = compression.compress(tensor, params)
-
-            compression.memory_update(tensor, tensor_compressed, ctx, params)
+            memory_update_op = compression.memory_update(tensor, tensor_compensate, tensor_compressed, ctx, params)
 
             if comm_method == 'allreduce':
                 summed_tensor_compressed = Allreduce(tensor_compressed)
                 if len(summed_tensor_compressed) == 1:
                     summed_tensor_compressed = summed_tensor_compressed[0]
-
-                # with tf.device(params['compression_device']):
                 summed_tensor = compression.decompress(summed_tensor_compressed, ctx, params)
                 new_tensor = (summed_tensor / horovod_size) if average else summed_tensor
 
             elif comm_method in ['broadcast', 'allgather']:
                 list_tensor_compressed = communicate[comm_method](tensor_compressed)
-
-                # with tf.device(params['compression_device']):
                 list_tensor_decompressed = []
                 for ranki in range(size()):
                     if len(list_tensor_compressed[ranki]) == 1:
@@ -271,7 +273,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
 
-        return new_tensor
+        return new_tensor, memory_update_op
 
 
 @_cache
