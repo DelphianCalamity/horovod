@@ -1372,6 +1372,7 @@ class custom_build_ext(build_ext):
             dummy_import_torch()
         if not os.environ.get('HOROVOD_WITHOUT_TENSORFLOW'):
             try:
+                print("\n\n\n Tensorflow \n\n\n")
                 build_tf_extension(self, options)
                 built_plugins.append(True)
             except:
