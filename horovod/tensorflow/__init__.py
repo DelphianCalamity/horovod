@@ -272,8 +272,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                         compression.decompress(tensor_compressed, ctx, params))
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
-
-        return new_tensor, memory_update_op
+        new_tensor = new_tensor + memory_update_op - memory_update_op
+        return new_tensor
 
 
 @_cache

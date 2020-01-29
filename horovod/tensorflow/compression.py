@@ -40,7 +40,8 @@ class Compressor(object):
         name = tensor.name
         tensor_decompressed = cls.decompress(tensor_compressed, ctx, params)
         delta = tensor_compensate - tensor_decompressed
-        return cls.residuals[name].assign(delta) if use_memory else []
+        memory_update_op = cls.residuals[name].assign(delta) if use_memory else 0
+        return memory_update_op
 
     @staticmethod
     def aggregate(tensors, params):
@@ -91,7 +92,6 @@ class FP16Compressor(Compressor):
 
 
 class RandomkCompressor(Compressor):
-    """Python libraries Based Compress by performing sparsification (i.e., sending a ratio of the actual tensor size."""
     global_step = 0
 
     @staticmethod
@@ -102,16 +102,13 @@ class RandomkCompressor(Compressor):
         tensor_flatten = tf.reshape(tensor, [-1])
         elemnum = tensor_flatten.get_shape().as_list()[0]
         compress_ratio = params["compress_ratio"]
-
-        rand = random.Random()
-        h = hash(tensor.name + str(RandomkCompressor.global_step))
+        all_indices = tf.range(elemnum, dtype=tf.int32)
+        h = hash(tensor.name) + RandomkCompressor.global_step
+        tf.compat.v1.set_random_seed(1)
+        indices = tf.random.shuffle(all_indices, seed=h)[:max(1, int(elemnum * compress_ratio))]
         RandomkCompressor.global_step += 1
-        rand.seed(h)
-        var = rand.sample(range(elemnum), max(1, int(elemnum * compress_ratio)))
-        #var.sort()
-        indices = tf.convert_to_tensor(var, dtype=tf.int32)
         values = tf.gather(tensor_flatten, indices)
-        ctx = indices, tensor_shape
+        ctx = indices, tensor_shape, tensor_flatten
         tensor_compressed = values
         params['tensors_size_are_same'] = True
 
@@ -120,11 +117,13 @@ class RandomkCompressor(Compressor):
     @staticmethod
     def decompress(tensor_compressed, ctx, params):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
-        indices, tensor_shape = ctx
+        indices, tensor_shape, tensor_flatten = ctx
         values = tensor_compressed
         tensor_size = tf.math.reduce_prod(tensor_shape)
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        temp = tf.scatter_update(zero_tensor, tf.range(tensor_size, dtype=tf.int32), tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tensor_decompressed + temp - temp
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
