@@ -2,6 +2,7 @@
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/shape_inference.h"
+#include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
 #include "bloomfilter/inc/OrdinaryBloomFilter.hpp"
@@ -15,9 +16,19 @@ REGISTER_OP("BloomCompressor")
 .Input("values: T")
 .Input("indices: int32")
 .Output("compressed_tensor: T")
-// .SetShapeFn([](shape_inference::InferenceContext* c) {
-//   return shape_inference::ConcatShape(c, c->num_inputs() - 1);   // VALIDATE
+
+//Todo: Fix the segfault error below to enable shape inference
+// https://github.com/tensorflow/tensorflow/issues/31335
+/
+/ .SetShapeFn([](shape_inference::InferenceContext* c) {
+//   return shape_inference::ConcatV2Shape(c);
+//   return shape_inference::ConcatShape(c, c->num_inputs()-1);
 // })
+
+//.SetShapeFn([](shape_inference::InferenceContext* c) {
+//    c->set_output(0, c->input(0));
+//    return Status::OK();
+//})
 .Doc(R"doc(
         Receives 'values' and 'indices' as inputs and builds a bloom filter on the indices.
         Returns a tensor wich is the concatenation of the values and the bloom filter
@@ -81,27 +92,26 @@ public:
 
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
         for (int i = 0; i < indices_flat.size(); ++i) {
-            //        printf("i = %d\n", indices_flat(i));
             bloom.Insert(indices_flat(i));
         }
 
         const std::vector<bool> &bloom_vec = bloom.Get_bloom();
         for (int i = 0; i < bloom_vec.size(); i++) {
-            printf("A: %d\n", bloom_vec[i]);
+            printf("B: %d\n", bloom_vec[i]);
         }
 
         //    if (bloom.Query(indices_flat(0))) {
         //      std::cout << "Error: Query for first inserted element was false." << std::endl;
         //    }
 
-//////////////////////////////////////////////////////////////////////
-
         // Allocating the Output and passing the values
         int output_concat_dim = values_flat.size() + bloom_size;
         printf("Output_concat_size: = %d\n\n", output_concat_dim);
 
-        TensorShape output_shape(values.shape());
-        output_shape.set_dim(0, output_concat_dim);
+        TensorShape output_shape;
+        output_shape.AddDim(output_concat_dim);
+        printf("%d\n", output_shape.dims());
+        printf("%d\n", output_shape.dim_size(0));
 
         // Create an output tensor
         Tensor *output = NULL;
@@ -110,8 +120,8 @@ public:
 
 
         // Todo: Important!! Copy values and bloom in a more efficient way; \
-    //  use bytes datatype for output tensor and memcopy the integer values. \
-    //  https://github.com/tensorflow/tensorflow/blob/dcc414587f50673271a31ab767909ec89c956324/tensorflow/core/framework/tensor_testutil.h#L57
+        //  use bytes datatype for output tensor and memcopy the integer values. \
+        //  https://github.com/tensorflow/tensorflow/blob/dcc414587f50673271a31ab767909ec89c956324/tensorflow/core/framework/tensor_testutil.h#L57
 
         for (int i = 0; i < values_flat.size(); ++i) {
             output_flat(i) = values_flat(i);
@@ -119,10 +129,7 @@ public:
         for (int i = values_flat.size(), j = 0; j < bloom_size; ++i, ++j) {
             output_flat(i) = bloom_vec[j];
         }
-
-///////////////////////////////////////////////////////////////////////
     }
-
 };
 
 
