@@ -10,7 +10,7 @@
 
 using namespace tensorflow;
 
-
+// Todo: pass bloom size parameter as node argument
 REGISTER_OP("BloomCompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")
 .Input("values: T")
@@ -19,8 +19,10 @@ REGISTER_OP("BloomCompressor")
 
 //Todo: Fix the segfault error below to enable shape inference
 // https://github.com/tensorflow/tensorflow/issues/31335
-/
-/ .SetShapeFn([](shape_inference::InferenceContext* c) {
+//  https://github.com/tensorflow/tensorflow/issues/30494
+
+
+/// .SetShapeFn([](shape_inference::InferenceContext* c) {
 //   return shape_inference::ConcatV2Shape(c);
 //   return shape_inference::ConcatShape(c, c->num_inputs()-1);
 // })
@@ -138,5 +140,5 @@ REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_CPU), BloomCompres
 //ToDo: GPU implementation
 
 // #if HOROVOD_GPU_ALLREDUCE
-// REGISTER_KERNEL_BUILDER(Name("HorovodAllreduce").Device(DEVICE_GPU),HorovodAllreduceOp);
+// REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_GPU),BloomCompressorOp);
 // #endif
