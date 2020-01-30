@@ -146,8 +146,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
 
-    print("========================== print params ====================================")
-    print(params)
+    #print("========================== print params ====================================")
+    #print(params)
     if isinstance(tensor, tf.IndexedSlices):
         with tf.device(device_sparse):
             # For IndexedSlices, do two allgathers intead of an allreduce.
@@ -272,7 +272,26 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                         compression.decompress(tensor_compressed, ctx, params))
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
-        new_tensor = new_tensor + memory_update_op - memory_update_op
+
+            def compression_check_op(new_tensor):
+                h = hash(tensor.name) + tf.train.get_global_step()
+                temp, ctx = compression.compress(tensor_compensate, params)
+                tensor_decompressed = compression.decompress(temp, ctx, params)
+                print_op = tf.print("global_step:", tf.train.get_global_step(), "hash:", h, tensor.name, ":",
+                                    tf.shape(tensor), '\n',
+                                    "memory, tensor, tensor_compensate, tensor_decompressed, tensor_allreduced", '\n',
+                                    compression.residuals[tensor.name], '\n', tensor, '\n', tensor_compensate, '\n',
+                                    tensor_decompressed, '\n', new_tensor,'\n',
+                                    summarize=-1, end='\n',
+                                    output_stream="file:///home/ubuntu/hang/" + params[
+                                        "compress_method"] + "_grad_check_allgather")
+                some_tensor_list = tf.tuple([tensor_decompressed], control_inputs=[print_op])
+                return some_tensor_list[0]
+
+            if params['memory_debug'] and params['use_memory'] and tensor.name == 'tower_0/v0/gradients/tower_0/v0/cg/conv11/batchnorm12/FusedBatchNorm_grad/FusedBatchNormGrad:1':
+                print("tensor is found")
+                new_tensor = compression_check_op(new_tensor)
+            new_tensor = new_tensor + memory_update_op - memory_update_op
         return new_tensor
 
 

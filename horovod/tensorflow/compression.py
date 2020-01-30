@@ -122,7 +122,7 @@ class RandomkCompressor(Compressor):
         tensor_size = tf.math.reduce_prod(tensor_shape)
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
-        temp = tf.scatter_update(zero_tensor, tf.range(tensor_size, dtype=tf.int32), tf.zeros([tensor_size], dtype=tf.float32))
+        temp = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tensor_decompressed + temp - temp
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
@@ -156,6 +156,8 @@ class TopKCompressor(Compressor):
         tensor_size = tf.math.reduce_prod(tensor_shape)
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        temp = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tensor_decompressed + temp - temp
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
@@ -187,6 +189,8 @@ class ThresholdCompressor(Compressor):
         tensor_size = tf.math.reduce_prod(tensor_shape)
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        temp = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tensor_decompressed + temp - temp
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
@@ -610,6 +614,8 @@ class DgcCompressor(Compressor):
         tensor_size = tf.math.reduce_prod(tensor_shape)
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        temp = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tensor_decompressed + temp - temp
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
@@ -696,6 +702,8 @@ class AdaqCompressor(Compressor):
         minus_mean = tf.ones(tf.shape(minus_indices), dtype=tf.float32) * minus_mean
         tensor_decompressed = tf.scatter_update(zero_tensor, plus_indices, plus_mean)
         tensor_decompressed = tf.scatter_update(tensor_decompressed, minus_indices, minus_mean)
+        temp = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tensor_decompressed + temp - temp
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
@@ -750,6 +758,8 @@ class AdapSparseCompressor(Compressor):
         tensor_size = tf.math.reduce_prod(tensor_shape)
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
         tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        temp = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        tensor_decompressed = tensor_decompressed + temp - temp
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
