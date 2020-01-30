@@ -52,6 +52,3 @@
 [submodule "third_party/HTTPRequest"]
 	path = third_party/HTTPRequest
 	url = https://github.com/elnormous/HTTPRequest
-[submodule "third_party/bloomfilter"]
-	path = third_party/bloomfilter
-	url = https://github.com/DelphianCalamity/bloomfilter.git
