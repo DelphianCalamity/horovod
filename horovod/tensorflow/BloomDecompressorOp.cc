@@ -15,6 +15,8 @@ using namespace tensorflow;
 
 REGISTER_OP("BloomDecompressor")
 .Attr("T: {int32}")                 // Todo: Should be set to bytes
+.Attr("hash_num: int=4")
+.Attr("bloom_size: int=10")
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
 .Output("decompressed_tensor: T")
@@ -65,7 +67,12 @@ class BloomDecompressorOp : public OpKernel {
 
 public:
 
-    explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {}
+    explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+        OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
+        printf("Hash Num: = %d\n\n", hash_num);
+        OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        printf("Bloom_Size: = %d\n\n", bloom_size);
+    }
 
     void Compute(OpKernelContext *context) override {
 
@@ -75,11 +82,7 @@ public:
         const Tensor &decompressed_size = context->input(1);
         auto decompressed_size_flat = decompressed_size.flat<int>();
 
-        // Todo: Important: pass those as node arguments - not hardcoded
-        int hash_num = 2;
-        uint16_t bloom_size = 10;
         int values_size = compressed_tensor_flat.size()-bloom_size;
-        printf("Bloom_Size: = %d\n\n", bloom_size);
 
         printf("\n");
         printf("compressed_tensor dims: %d\n", compressed_tensor.shape().dims());
@@ -130,6 +133,10 @@ public:
         }
         free(values_vec);
     }
+
+private:
+    int hash_num;
+    int bloom_size;
 };
 
 

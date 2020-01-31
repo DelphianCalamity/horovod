@@ -13,6 +13,8 @@ using namespace tensorflow;
 // Todo: pass bloom size parameter as node argument
 REGISTER_OP("BloomCompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")
+.Attr("hash_num: int=2")
+.Attr("bloom_size: int=10")
 .Input("values: T")
 .Input("indices: int32")
 .Output("compressed_tensor: T")
@@ -62,7 +64,12 @@ class BloomCompressorOp : public OpKernel {
 
 public:
 
-    explicit BloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {}
+    explicit BloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+        OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
+        printf("Hash Num: = %d\n\n", hash_num);
+        OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        printf("Bloom_Size: = %d\n\n", bloom_size);
+    }
 
     void Compute(OpKernelContext *context) override {
 
@@ -76,7 +83,6 @@ public:
         printf("\n");
         printf("Values dims: %d\n", values.shape().dims());
         printf("Indices dims: %d\n", indices.shape().dims());
-        // shape (4,) + (4,) ===> (8,)
 
         printf("\n\n");
         printf("Values: %s\n", values.DebugString(values_flat.size()).c_str());
@@ -84,10 +90,6 @@ public:
         printf("\n\n");
 
         // Building Bloom Filter
-        int hash_num = 2;
-        uint16_t bloom_size = 10;
-        printf("Bloom_Size: = %d\n\n", bloom_size);
-
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
         for (int i = 0; i < indices_flat.size(); ++i) {
             bloom.Insert(indices_flat(i));
@@ -111,7 +113,6 @@ public:
         OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output));
         auto output_flat = output->template flat<int>();
 
-
         // Todo: Important!! Copy values and bloom in a more efficient way; \
         //  use bytes datatype for output tensor and memcopy the integer values. \
         //  https://github.com/tensorflow/tensorflow/blob/dcc414587f50673271a31ab767909ec89c956324/tensorflow/core/framework/tensor_testutil.h#L57
@@ -123,6 +124,10 @@ public:
             output_flat(i) = bloom_vec[j];
         }
     }
+
+private:
+    int hash_num;
+    int bloom_size;
 };
 
 
