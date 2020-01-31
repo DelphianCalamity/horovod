@@ -37,7 +37,7 @@ REGISTER_OP("BloomDecompressor")
 .Doc(R"doc(
         Receives a compressed tensor which is a concatenation of values and bloom filter,
         splits it to those two tensors using the bloom_size info and uses both of them
-         to re-construct the initial tensor.
+         to re-construct the initial tensor. Also receives the decompressed tensor's size.
         Arguments
             compressed_tensor: concatenation of values and bloom filter
         Output
@@ -75,6 +75,12 @@ public:
         const Tensor &decompressed_size = context->input(1);
         auto decompressed_size_flat = decompressed_size.flat<int>();
 
+        // Todo: Important: pass those as node arguments - not hardcoded
+        int hash_num = 2;
+        uint16_t bloom_size = 10;
+        int values_size = compressed_tensor_flat.size()-bloom_size;
+        printf("Bloom_Size: = %d\n\n", bloom_size);
+
         printf("\n");
         printf("compressed_tensor dims: %d\n", compressed_tensor.shape().dims());
 
@@ -83,22 +89,23 @@ public:
         printf("decompressed size: %s\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
         printf("\n\n");
 
-        // Todo: Important: pass those as node arguments - not hardcoded
         // Reconstruct the bloom filter
-        int hash_num = 2;
-        uint16_t bloom_size = 10;
-        printf("Bloom_Size: = %d\n\n", bloom_size);
+        int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));         // Todo: to bytes
+        memcpy(bloom_vec, compressed_tensor_flat.data()+values_size, bloom_size*sizeof(int));
 
-        int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));     // Todo: to bytes
-        // move the bloom filter from compressed_tensor to bloom
+        int *values_vec = (int*) malloc(values_size*sizeof(int));       // Todo: to bytes
+        memcpy(values_vec, compressed_tensor_flat.data(), values_size*sizeof(int));
 //        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
-        memcpy(bloom_vec, compressed_tensor_flat.data()+compressed_tensor_flat.size()-bloom_size, bloom_size*sizeof(int));
 
         for (int i = 0; i < bloom_size; i++) {
             printf("B: %d\n", (int) bloom_vec[i]);
         }
+        for (int i = 0; i < values_size; i++) {
+            printf("V: %d\n", (int) values_vec[i]);
+        }
 
         bloom::OrdinaryBloomFilter<uint32_t> bloom_filter(hash_num, bloom_size, bloom_vec);
+        free(bloom_vec);
 
         TensorShape decompressed_tensor_shape;
         decompressed_tensor_shape.AddDim(*decompressed_size_flat.data());
@@ -112,13 +119,16 @@ public:
         OP_REQUIRES_OK(context, context->allocate_output(0, decompressed_tensor_shape, &decompressed_tensor));
         auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
 
-
-        // Reconstruct Initial Tensor
-        // write the values directly to the output tensor
-        // while ....
-        //    if (bloom.Query(indices_flat(0))) {
-        //      std::cout << "Error: Query for first inserted element was false." << std::endl;
-        //    }
+        // Decode the compressed tensor
+        for (int i=0,j=0; j<values_size; ++i) {
+            if (bloom_filter.Query(i)) {
+                decompressed_tensor_flat(i) = values_vec[j];
+                j++;
+            } else {
+                decompressed_tensor_flat(i) = 0;
+            }
+        }
+        free(values_vec);
     }
 };
 
