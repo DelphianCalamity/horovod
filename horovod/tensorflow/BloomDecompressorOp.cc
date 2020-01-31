@@ -16,6 +16,7 @@ using namespace tensorflow;
 REGISTER_OP("BloomDecompressor")
 .Attr("T: {int32}")                 // Todo: Should be set to bytes
 .Input("compressed_tensor: T")
+.Input("decompressed_size: int32")
 .Output("decompressed_tensor: T")
 /*
 //Todo: Fix the segfault error below to enable shape inference
@@ -50,7 +51,6 @@ namespace std {
         size_t operator()(bloom::HashParams<uint32_t> const &s) const {
             bloom::FnvHash32 h;
             h.Update(&s.b, sizeof(uint8_t));
-
             void *buff = malloc(sizeof(uint32_t));
             memcpy(buff, &s.a, sizeof(uint32_t));
             h.Update((const uint8_t *) buff, sizeof(uint32_t));
@@ -61,7 +61,7 @@ namespace std {
 }
 
 
-class BloomCompressorOp : public OpKernel {
+class BloomDecompressorOp : public OpKernel {
 
 public:
 
@@ -71,13 +71,16 @@ public:
 
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
-        auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Excpect bytes
+        auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bytes
+        const Tensor &decompressed_size = context->input(1);
+        auto decompressed_size_flat = decompressed_size.flat<int>();
 
         printf("\n");
         printf("compressed_tensor dims: %d\n", compressed_tensor.shape().dims());
 
         printf("\n\n");
-        printf("compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor.size()).c_str());
+        printf("compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
+        printf("decompressed size: %s\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
         printf("\n\n");
 
         // Todo: Important: pass those as node arguments - not hardcoded
@@ -86,32 +89,28 @@ public:
         uint16_t bloom_size = 10;
         printf("Bloom_Size: = %d\n\n", bloom_size);
 
-        std::vector<int> bloom;                 // Todo: to bytes
-        bloom.resize(bloom_size);
+        int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));     // Todo: to bytes
+        // move the bloom filter from compressed_tensor to bloom
+//        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
+        memcpy(bloom_vec, compressed_tensor_flat.data()+compressed_tensor_flat.size()-bloom_size, bloom_size*sizeof(int));
 
-        // move the the bloom filter from compressed_tensor to bloom
-        memcpy(bloom, bloom_size, compressed_tensor_flat);
-//        // Validate
-//        const std::vector<bool> &bloom_vec = bloom.Get_bloom();
-//        for (int i = 0; i < bloom_vec.size(); i++) {
-//            printf("B: %d\n", bloom_vec[i]);
-//        }
-        bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom);
+        for (int i = 0; i < bloom_size; i++) {
+            printf("B: %d\n", (int) bloom_vec[i]);
+        }
 
-
-
-        // Allocating the Output and passing the values
-        int tensor_initial_size = 2;  //fix this
-        printf("tensor_initial_size: = %d\n\n", tensor_initial_size);
-        // Create an output tensor
-        Tensor *decompressed_tensor = NULL;
-        OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &decompressed_tensor));
-        auto output_flat = output->template flat<int>();
+        bloom::OrdinaryBloomFilter<uint32_t> bloom_filter(hash_num, bloom_size, bloom_vec);
 
         TensorShape decompressed_tensor_shape;
-        output_shape.AddDim(tensor_initial_size);
-        printf("%d\n", output_shape.dims());
-        printf("%d\n", output_shape.dim_size(0));
+        decompressed_tensor_shape.AddDim(*decompressed_size_flat.data());
+        printf("%d\n", decompressed_tensor_shape.dims());
+        printf("%d\n", decompressed_tensor_shape.dim_size(0));
+
+        printf("tensor_initial_size: = %d\n\n", *decompressed_size_flat.data());
+
+        // Create an output tensor
+        Tensor *decompressed_tensor = NULL;
+        OP_REQUIRES_OK(context, context->allocate_output(0, decompressed_tensor_shape, &decompressed_tensor));
+        auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
 
 
         // Reconstruct Initial Tensor

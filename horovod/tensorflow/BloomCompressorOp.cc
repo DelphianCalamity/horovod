@@ -42,16 +42,12 @@ REGISTER_OP("BloomCompressor")
     )doc");
 
 
-// template <typename T>
-// typedef std::vector<std::unique_ptr<typename TTypes<T, 1>::ConstVec>> ConstVecVector;
-
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
         size_t operator()(bloom::HashParams<uint32_t> const &s) const {
             bloom::FnvHash32 h;
             h.Update(&s.b, sizeof(uint8_t));
-
             void *buff = malloc(sizeof(uint32_t));
             memcpy(buff, &s.a, sizeof(uint32_t));
             h.Update((const uint8_t *) buff, sizeof(uint32_t));
@@ -98,15 +94,10 @@ public:
         }
 
         const std::vector<bool> &bloom_vec = bloom.Get_bloom();
-        for (int i = 0; i < bloom_vec.size(); i++) {
-            printf("B: %d\n", bloom_vec[i]);
-        }
+//        for (int i = 0; i < bloom_vec.size(); i++) {
+//            printf("B: %d\n", bloom_vec[i]);
+//        }
 
-        //    if (bloom.Query(indices_flat(0))) {
-        //      std::cout << "Error: Query for first inserted element was false." << std::endl;
-        //    }
-
-        // Allocating the Output and passing the values
         int output_concat_dim = values_flat.size() + bloom_size;
         printf("Output_concat_size: = %d\n\n", output_concat_dim);
 
