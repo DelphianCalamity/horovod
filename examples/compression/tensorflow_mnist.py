@@ -107,9 +107,10 @@ def main(_):
     args = make_args_parser()
 
     params = {}
-    params['compress_method'] = args.compress_method #"bloom_topk"
-    params['compress_state'] = args.compress_state #True
+    params['compress_method'] = args.compress_method    # "bloom_topk"
+    params['compress_state'] = args.compress_state  # True
     params['bloom_size'] = args.bloom_size
+    params['hash_num'] = args.hash_num
 
     # Horovod: initialize Horovod.
     hvd.init()

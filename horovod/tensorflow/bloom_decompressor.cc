@@ -11,12 +11,12 @@
 using namespace tensorflow;
 
 REGISTER_OP("BloomDecompressor")
-.Attr("T: {int32}")                 // Todo: Should be set to bytes
+.Attr("T: {int32, int64, float16, float32, float64}")                // Todo: Should be set to bits
 .Attr("hash_num: int=4")
 .Attr("bloom_size: int=10")
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
-.Output("decompressed_tensor: T")
+.Output("decompressed_tensor: float32")
 /*
 //Todo: Fix the segfault error below to enable shape inference
 // https://github.com/tensorflow/tensorflow/issues/31335
@@ -84,7 +84,7 @@ public:
 
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
-        auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bytes
+        auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bits
         const Tensor &decompressed_size = context->input(1);
         auto decompressed_size_flat = decompressed_size.flat<int>();
 
@@ -95,10 +95,10 @@ public:
         printf("decompressed size: %s\n\n\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
 
         // Reconstruct the bloom filter
-        int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));         // Todo: to bytes
+        int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));         // Todo: to bits
         memcpy(bloom_vec, compressed_tensor_flat.data()+values_size, bloom_size*sizeof(int));
 
-        int *values_vec = (int*) malloc(values_size*sizeof(int));       // Todo: to bytes
+        int *values_vec = (int*) malloc(values_size*sizeof(int));       // Todo: to bits
         memcpy(values_vec, compressed_tensor_flat.data(), values_size*sizeof(int));
 //        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
 
@@ -117,15 +117,15 @@ public:
         // Create an output tensor
         Tensor *decompressed_tensor = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, decompressed_tensor_shape, &decompressed_tensor));
-        auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
+        auto decompressed_tensor_flat = decompressed_tensor->template flat<float>();
 
         // Decode the compressed tensor
         for (int i=0,j=0; j<values_size; ++i) {
             if (bloom_filter.Query(i)) {
-                decompressed_tensor_flat(i) = values_vec[j];
+                decompressed_tensor_flat(i) = (float) values_vec[j];
                 j++;
             } else {
-                decompressed_tensor_flat(i) = 0;
+                decompressed_tensor_flat(i) = 0.0;
             }
         }
         free(values_vec);
