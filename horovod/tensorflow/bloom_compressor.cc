@@ -5,8 +5,8 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
-#include "bloomfilter/inc/OrdinaryBloomFilter.hpp"
-#include "bloomfilter/inc/FnvHash.hpp"
+#include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
+#include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 
 using namespace tensorflow;
 
@@ -80,14 +80,10 @@ public:
         auto values_flat = values.flat<int>();
         auto indices_flat = indices.flat<int>();
 
-        printf("\n");
-        printf("Values dims: %d\n", values.shape().dims());
+        printf("\nValues dims: %d\n", values.shape().dims());
         printf("Indices dims: %d\n", indices.shape().dims());
-
-        printf("\n\n");
-        printf("Values: %s\n", values.DebugString(values_flat.size()).c_str());
-        printf("Indices: %s\n", indices.DebugString(indices_flat.size()).c_str());
-        printf("\n\n");
+        printf("\n\nValues: %s\n", values.DebugString(values_flat.size()).c_str());
+        printf("Indices: %s\n\n\n", indices.DebugString(indices_flat.size()).c_str());
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
@@ -96,9 +92,6 @@ public:
         }
 
         const std::vector<bool> &bloom_vec = bloom.Get_bloom();
-//        for (int i = 0; i < bloom_vec.size(); i++) {
-//            printf("B: %d\n", bloom_vec[i]);
-//        }
 
         int output_concat_dim = values_flat.size() + bloom_size;
         printf("Output_concat_size: = %d\n\n", output_concat_dim);
@@ -114,7 +107,7 @@ public:
         auto output_flat = output->template flat<int>();
 
         // Todo: Important!! Copy values and bloom in a more efficient way; \
-        //  use bytes datatype for output tensor and memcopy the integer values. \
+        // use bytes datatype for output tensor and memcopy the integer values. \
         //  https://github.com/tensorflow/tensorflow/blob/dcc414587f50673271a31ab767909ec89c956324/tensorflow/core/framework/tensor_testutil.h#L57
 
         for (int i = 0; i < values_flat.size(); ++i) {

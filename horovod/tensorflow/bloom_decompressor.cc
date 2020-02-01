@@ -5,13 +5,10 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
-#include "bloomfilter/inc/OrdinaryBloomFilter.hpp"
-#include "bloomfilter/inc/FnvHash.hpp"
+#include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
+#include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 
 using namespace tensorflow;
-
-// Todo: pass bloom size parameter as node argument
-// Todo: need to have the initial size of the tensor.. how?
 
 REGISTER_OP("BloomDecompressor")
 .Attr("T: {int32}")                 // Todo: Should be set to bytes
@@ -62,6 +59,15 @@ namespace std {
     };
 }
 
+void print_vector(int* vec, int size) {
+    printf("\n[");
+    int i=0;
+    for (i = 0; i < size-1; i++) {
+        printf("%d, ", (int) vec[i]);
+    }
+    printf("%d]\n\n", (int) vec[i]);
+}
+
 
 class BloomDecompressorOp : public OpKernel {
 
@@ -69,9 +75,9 @@ public:
 
     explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
-        printf("Hash Num: = %d\n\n", hash_num);
+        printf("Hash Num: = %d\n", hash_num);
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
-        printf("Bloom_Size: = %d\n\n", bloom_size);
+        printf("Bloom_Size: = %d\n", bloom_size);
     }
 
     void Compute(OpKernelContext *context) override {
@@ -84,13 +90,9 @@ public:
 
         int values_size = compressed_tensor_flat.size()-bloom_size;
 
-        printf("\n");
-        printf("compressed_tensor dims: %d\n", compressed_tensor.shape().dims());
-
-        printf("\n\n");
+        printf("\ncompressed_tensor dims: %d\n\n\n", compressed_tensor.shape().dims());
         printf("compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
-        printf("decompressed size: %s\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
-        printf("\n\n");
+        printf("decompressed size: %s\n\n\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
 
         // Reconstruct the bloom filter
         int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));         // Todo: to bytes
@@ -100,21 +102,16 @@ public:
         memcpy(values_vec, compressed_tensor_flat.data(), values_size*sizeof(int));
 //        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
 
-        for (int i = 0; i < bloom_size; i++) {
-            printf("B: %d\n", (int) bloom_vec[i]);
-        }
-        for (int i = 0; i < values_size; i++) {
-            printf("V: %d\n", (int) values_vec[i]);
-        }
+        printf("Bloom Filter:"); print_vector(bloom_vec, bloom_size);
+        printf("Values Vector:"); print_vector(values_vec, values_size);
 
         bloom::OrdinaryBloomFilter<uint32_t> bloom_filter(hash_num, bloom_size, bloom_vec);
         free(bloom_vec);
 
         TensorShape decompressed_tensor_shape;
         decompressed_tensor_shape.AddDim(*decompressed_size_flat.data());
-        printf("%d\n", decompressed_tensor_shape.dims());
-        printf("%d\n", decompressed_tensor_shape.dim_size(0));
-
+        printf("Decompressed Dims: %d\n", decompressed_tensor_shape.dims());
+        printf("Decompressed Dim0: %d\n", decompressed_tensor_shape.dim_size(0));
         printf("tensor_initial_size: = %d\n\n", *decompressed_size_flat.data());
 
         // Create an output tensor
