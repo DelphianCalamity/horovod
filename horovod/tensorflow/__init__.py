@@ -142,6 +142,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comm_method = params["comm_method"]
     horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
     compression = params["compressor"]
+    params['tensor_name'] = tensor.name
 
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
@@ -265,11 +266,11 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 list_tensor_decompressed = []
                 for ranki in range(size()):
                     if len(list_tensor_compressed[ranki]) == 1:
-                        tensor_compressed = list_tensor_compressed[ranki][0]
+                        temp = list_tensor_compressed[ranki][0]
                     else:
-                        tensor_compressed = list_tensor_compressed[ranki]
+                        temp = list_tensor_compressed[ranki]
                     list_tensor_decompressed.append(
-                        compression.decompress(tensor_compressed, ctx, params))
+                        compression.decompress(temp, ctx, params))
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
 
@@ -291,7 +292,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             if params['memory_debug'] and params['use_memory'] and tensor.name == 'tower_0/v0/gradients/tower_0/v0/cg/conv11/batchnorm12/FusedBatchNorm_grad/FusedBatchNormGrad:1':
                 print("tensor is found")
                 new_tensor = compression_check_op(new_tensor)
-            new_tensor = new_tensor + memory_update_op - memory_update_op
+            for op in memory_update_op:
+                new_tensor = new_tensor + op - op
         return new_tensor
 
 
