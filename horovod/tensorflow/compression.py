@@ -190,7 +190,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         bloom_compressor = library.bloom_compressor
 
         compressed_tensor = bloom_compressor(values, indices, hash_num=params['hash_num'],
-                                                bloom_size=params['bloom_size'], logfile=params['logfile_suffix'])
+                                                bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
         # if compressed_tensor.name == 'DistributedAdamOptimizer_Allreduce/BloomCompressor_1:0':
@@ -210,7 +210,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         bloom_decompressor = library.bloom_decompressor
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size, hash_num=params['hash_num'],
-                                                bloom_size=params['bloom_size'], logfile=params['logfile_suffix'])
+                                                bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'])
 
         params['logfile_suffix'] = params['logfile_suffix']+1
 
