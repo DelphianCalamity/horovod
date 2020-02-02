@@ -173,13 +173,15 @@ class Bloom_Filter_TopKCompressor(Compressor):
     def compress(tensor, params):
 
         tensor_shape = tf.shape(tensor)
+
+        # Consider not flattening since this happens in compressor too
         tensor_flatten = tf.reshape(tensor, [-1])
         elemnum = tensor_flatten.get_shape().as_list()[0]
 
         compress_ratio = params["compress_ratio"]
         k = max(1, int(elemnum * compress_ratio))
 
-        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k)
+        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         values = tf.gather(tensor_flatten, indices)
         values = tf.bitcast(values, tf.int32)
 
@@ -191,6 +193,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
                                                 bloom_size=params['bloom_size'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
+        if compressed_tensor.name == 'DistributedAdamOptimizer_Allreduce/BloomCompressor_1:0':
+            compressed_tensor = tf.Print(compressed_tensor, [compressed_tensor], "Compressed_Tensor: ", summarize=100)
         # compressed_tensor = tf.Print(compressed_tensor, [compressed_tensor], "Compressed_Tensor: ")
         return compressed_tensor, ctx
 
@@ -209,6 +213,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
                                                 bloom_size=params['bloom_size'])
 
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
+        if decompressed_tensor.name == 'DistributedAdamOptimizer_Allreduce/BloomDecompressor_1:0':
+            decompressed_tensor = tf.Print(decompressed_tensor, [decompressed_tensor], "Decompressed_Tensor: ", summarize=100)
         # decompressed_tensor = tf.Print(decompressed_tensor, [decompressed_tensor], "Decompressed_Tensor: ")
         return decompressed_tensor
 

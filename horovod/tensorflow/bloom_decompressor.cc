@@ -59,13 +59,13 @@ namespace std {
     };
 }
 
-void print_vector(int* vec, int size) {
-    printf("\n[");
+void print_vector(int* vec, int size, FILE* f) {
+    fprintf(f, "\n[");
     int i=0;
     for (i = 0; i < size-1; i++) {
-        printf("%d, ", (int) vec[i]);
+        fprintf(f, "%d, ", (int) vec[i]);
     }
-    printf("%d]\n\n", (int) vec[i]);
+    fprintf(f, "%d]\n\n", (int) vec[i]);
 }
 
 
@@ -75,12 +75,12 @@ public:
 
     explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
-        printf("Hash Num: = %d\n", hash_num);
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
-        printf("Bloom_Size: = %d\n", bloom_size);
     }
 
     void Compute(OpKernelContext *context) override {
+
+        FILE* f = fopen ("decompressor_logs.txt","w");
 
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
@@ -90,9 +90,8 @@ public:
 
         int values_size = compressed_tensor_flat.size()-bloom_size;
 
-        printf("\ncompressed_tensor dims: %d\n\n\n", compressed_tensor.shape().dims());
-        printf("compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
-        printf("decompressed size: %s\n\n\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
+        fprintf(f, "compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
+        fprintf(f, "decompressed size: %s\n\n\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
 
         // Reconstruct the bloom filter
         int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));         // Todo: to bits
@@ -102,17 +101,14 @@ public:
         memcpy(values_vec, compressed_tensor_flat.data(), values_size*sizeof(int));
 //        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
 
-        printf("Bloom Filter:"); print_vector(bloom_vec, bloom_size);
-        printf("Values Vector:"); print_vector(values_vec, values_size);
+        fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
+        fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
 
         bloom::OrdinaryBloomFilter<uint32_t> bloom_filter(hash_num, bloom_size, bloom_vec);
         free(bloom_vec);
 
         TensorShape decompressed_tensor_shape;
         decompressed_tensor_shape.AddDim(*decompressed_size_flat.data());
-        printf("Decompressed Dims: %d\n", decompressed_tensor_shape.dims());
-        printf("Decompressed Dim0: %d\n", decompressed_tensor_shape.dim_size(0));
-        printf("tensor_initial_size: = %d\n\n", *decompressed_size_flat.data());
 
         // Create an output tensor
         Tensor *decompressed_tensor = NULL;
@@ -129,6 +125,9 @@ public:
             }
         }
         free(values_vec);
+
+        fprintf(f, "\n\n\n\n\n\n########################################################################################\n\n\n\n\n\n");
+
     }
 
 private:

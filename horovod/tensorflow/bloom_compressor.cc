@@ -10,7 +10,6 @@
 
 using namespace tensorflow;
 
-// Todo: pass bloom size parameter as node argument
 REGISTER_OP("BloomCompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("hash_num: int=2")
@@ -66,12 +65,12 @@ public:
 
     explicit BloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
-        printf("Hash Num: = %d\n\n", hash_num);
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
-        printf("Bloom_Size: = %d\n\n", bloom_size);
     }
 
     void Compute(OpKernelContext *context) override {
+
+        FILE* f = fopen ("compressor_logs.txt","w");
 
         // Retrieving Inputs
         const Tensor &values = context->input(0);
@@ -80,10 +79,10 @@ public:
         auto values_flat = values.flat<int>();
         auto indices_flat = indices.flat<int>();
 
-        printf("\nValues dims: %d\n", values.shape().dims());
-        printf("Indices dims: %d\n", indices.shape().dims());
-        printf("\n\nValues: %s\n", values.DebugString(values_flat.size()).c_str());
-        printf("Indices: %s\n\n\n", indices.DebugString(indices_flat.size()).c_str());
+        fprintf(f, "\nValues dims: %d\n", values.shape().dims());
+        fprintf(f, "Indices dims: %d\n", indices.shape().dims());
+        fprintf(f, "\n\nValues: %s\n", values.DebugString(values_flat.size()).c_str());
+        fprintf(f, "Indices: %s\n\n\n", indices.DebugString(indices_flat.size()).c_str());
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
@@ -94,12 +93,12 @@ public:
         const std::vector<bool> &bloom_vec = bloom.Get_bloom();
 
         int output_concat_dim = values_flat.size() + bloom_size;
-        printf("Output_concat_size: = %d\n\n", output_concat_dim);
+        fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
 
         TensorShape output_shape;
         output_shape.AddDim(output_concat_dim);
-        printf("%d\n", output_shape.dims());
-        printf("%d\n", output_shape.dim_size(0));
+        fprintf(f, "%d\n", output_shape.dims());
+        fprintf(f, "%d\n", output_shape.dim_size(0));
 
         // Create an output tensor
         Tensor *output = NULL;
@@ -116,6 +115,8 @@ public:
         for (int i = values_flat.size(), j = 0; j < bloom_size; ++i, ++j) {
             output_flat(i) = bloom_vec[j];
         }
+
+        fprintf(f, "\n\n\n\n\n\n########################################################################################\n\n\n\n\n\n");
     }
 
 private:
@@ -131,3 +132,4 @@ REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_CPU), BloomCompres
 // #if HOROVOD_GPU_ALLREDUCE
 // REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_GPU),BloomCompressorOp);
 // #endif
+
