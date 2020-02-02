@@ -183,7 +183,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         values = tf.gather(tensor_flatten, indices)
         values = tf.bitcast(values, tf.int32)
 
-        filename = resource_loader.get_path_to_datafile('bloom_compressor_op.so')
+        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
         library = load_library.load_op_library(filename)
         bloom_compressor = library.bloom_compressor
 
@@ -191,31 +191,25 @@ class Bloom_Filter_TopKCompressor(Compressor):
                                                 bloom_size=params['bloom_size'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
-        compressed_tensor = tf.Print(compressed_tensor, [compressed_tensor])
+        # compressed_tensor = tf.Print(compressed_tensor, [compressed_tensor], "Compressed_Tensor: ")
         return compressed_tensor, ctx
 
     @staticmethod
     def decompress(compressed_tensor, ctx, params):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
 
-        # splitting is done inside the decompressor
-        # values_size = params['values_size']
-        # bloom_size = params['bloom_size ']
-        # values, bloom = tf.split(tensor_compressed, [values_size, bloom_size])
-        # values = tf.bitcast(values, tf.float32)
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
-        filename = resource_loader.get_path_to_datafile('bloom_decompressor_op.so')
+        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
         library = load_library.load_op_library(filename)
         bloom_decompressor = library.bloom_decompressor
-
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size, hash_num=params['hash_num'],
                                                 bloom_size=params['bloom_size'])
 
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
-        decompressed_tensor = tf.Print(decompressed_tensor, [decompressed_tensor])
+        # decompressed_tensor = tf.Print(decompressed_tensor, [decompressed_tensor], "Decompressed_Tensor: ")
         return decompressed_tensor
 
 

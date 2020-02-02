@@ -49,6 +49,12 @@ def make_args_parser():
         default=1000,
         help="size of the bloom filter",
     )
+    parser.add_argument(
+        '-hf',
+        '--hash_functions',
+        type=int,
+        default=4,
+        help="Number of hash functions")
     return parser.parse_args()
 
 
@@ -110,7 +116,7 @@ def main(_):
     params['compress_method'] = args.compress_method    # "bloom_topk"
     params['compress_state'] = args.compress_state  # True
     params['bloom_size'] = args.bloom_size
-    params['hash_num'] = args.hash_num
+    params['hash_num'] = args.hash_functions
 
     # Horovod: initialize Horovod.
     hvd.init()
