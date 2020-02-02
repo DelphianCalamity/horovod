@@ -7,13 +7,15 @@
 #include "tensorflow/core/framework/tensor_types.h"
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
 #include "../../third_party/bloomfilter/inc/FnvHash.hpp"
+#include <string>
 
 using namespace tensorflow;
 
 REGISTER_OP("BloomCompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")
-.Attr("hash_num: int=2")
-.Attr("bloom_size: int=10")
+.Attr("hash_num: int")
+.Attr("bloom_size: int")
+.Attr("logfile_suffix: int")
 .Input("values: T")
 .Input("indices: int32")
 .Output("compressed_tensor: T")
@@ -66,12 +68,13 @@ public:
     explicit BloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));
     }
 
     void Compute(OpKernelContext *context) override {
 
-        FILE* f = fopen ("compressor_logs.txt","w");
-
+        std::string str = "logs/compressor_logs_" + std::to_string(logfile_suffix) + ".txt";
+        FILE* f = fopen(str.c_str(),"w");
         // Retrieving Inputs
         const Tensor &values = context->input(0);
         const Tensor &indices = context->input(1);
@@ -79,10 +82,8 @@ public:
         auto values_flat = values.flat<int>();
         auto indices_flat = indices.flat<int>();
 
-        fprintf(f, "\nValues dims: %d\n", values.shape().dims());
-        fprintf(f, "Indices dims: %d\n", indices.shape().dims());
-        fprintf(f, "\n\nValues: %s\n", values.DebugString(values_flat.size()).c_str());
-        fprintf(f, "Indices: %s\n\n\n", indices.DebugString(indices_flat.size()).c_str());
+        fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
+        fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
@@ -97,8 +98,8 @@ public:
 
         TensorShape output_shape;
         output_shape.AddDim(output_concat_dim);
-        fprintf(f, "%d\n", output_shape.dims());
-        fprintf(f, "%d\n", output_shape.dim_size(0));
+//        fprintf(f, "%d\n", output_shape.dims());
+//        fprintf(f, "%d\n", output_shape.dim_size(0));
 
         // Create an output tensor
         Tensor *output = NULL;
@@ -116,12 +117,13 @@ public:
             output_flat(i) = bloom_vec[j];
         }
 
-        fprintf(f, "\n\n\n\n\n\n########################################################################################\n\n\n\n\n\n");
+        fprintf(f, "\n\n########################################################################################\n\n");
     }
 
 private:
     int hash_num;
     int bloom_size;
+    int logfile_suffix;
 };
 
 

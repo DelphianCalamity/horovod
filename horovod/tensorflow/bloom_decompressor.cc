@@ -7,13 +7,16 @@
 #include "tensorflow/core/framework/tensor_types.h"
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
 #include "../../third_party/bloomfilter/inc/FnvHash.hpp"
+#include <string>
+
 
 using namespace tensorflow;
 
 REGISTER_OP("BloomDecompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")                // Todo: Should be set to bits
-.Attr("hash_num: int=4")
-.Attr("bloom_size: int=10")
+.Attr("hash_num: int")
+.Attr("bloom_size: int")
+.Attr("logfile_suffix: int")
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
 .Output("decompressed_tensor: float32")
@@ -76,12 +79,14 @@ public:
     explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));
+
     }
 
     void Compute(OpKernelContext *context) override {
 
-        FILE* f = fopen ("decompressor_logs.txt","w");
-
+        std::string str = "logs/decompressor_logs_" + std::to_string(logfile_suffix) + ".txt";
+        FILE* f = fopen(str.c_str(),"w");
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
         auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bits
@@ -126,13 +131,14 @@ public:
         }
         free(values_vec);
 
-        fprintf(f, "\n\n\n\n\n\n########################################################################################\n\n\n\n\n\n");
+        fprintf(f, "\n\n########################################################################################\n\n");
 
     }
 
 private:
     int hash_num;
     int bloom_size;
+    int logfile_suffix;
 };
 
 

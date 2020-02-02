@@ -117,6 +117,8 @@ def main(_):
     params['compress_state'] = args.compress_state  # True
     params['bloom_size'] = args.bloom_size
     params['hash_num'] = args.hash_functions
+    params['logfile_suffix'] = 0
+
 
     # Horovod: initialize Horovod.
     hvd.init()
