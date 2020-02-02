@@ -8,6 +8,7 @@
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
 #include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 #include <string>
+#include <cstdlib>
 
 using namespace tensorflow;
 
@@ -18,6 +19,7 @@ REGISTER_OP("BloomCompressor")
 .Attr("logfile_suffix: int")
 .Input("values: T")
 .Input("indices: int32")
+.Input("initial_tensor: float32")    // For debugging purposes
 .Output("compressed_tensor: T")
 
 //Todo: Fix the segfault error below to enable shape inference
@@ -48,16 +50,16 @@ REGISTER_OP("BloomCompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-            bloom::FnvHash32 h;
-            h.Update(&s.b, sizeof(uint8_t));
-            void *buff = malloc(sizeof(uint32_t));
-            memcpy(buff, &s.a, sizeof(uint32_t));
-            h.Update((const uint8_t *) buff, sizeof(uint32_t));
-            free(buff);
-            return h.Digest();
-        }
-    };
+    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+    bloom::FnvHash32 h;
+    h.Update(&s.b, sizeof(uint8_t));
+    void *buff = malloc(sizeof(uint32_t));
+    memcpy(buff, &s.a, sizeof(uint32_t));
+    h.Update((const uint8_t *) buff, sizeof(uint32_t));
+    free(buff);
+    return h.Digest();
+}
+};
 }
 
 
@@ -73,15 +75,21 @@ public:
 
     void Compute(OpKernelContext *context) override {
 
-        std::string str = "logs/compressor_logs_" + std::to_string(logfile_suffix) + ".txt";
+        std::string suffix = std::to_string(logfile_suffix);
+        std::string cmd = "mkdir -p logs/" + suffix;
+        system(cmd.c_str());
+        std::string str = "logs/" + suffix + "/compressor_logs_" + suffix + ".txt";
         FILE* f = fopen(str.c_str(),"w");
         // Retrieving Inputs
         const Tensor &values = context->input(0);
         const Tensor &indices = context->input(1);
+        const Tensor &initial_tensor = context->input(2);
 
         auto values_flat = values.flat<int>();
         auto indices_flat = indices.flat<int>();
+        auto initial_flat = initial_tensor.flat<float>();
 
+        fprintf(f, "Initial Tensor: %s\n", initial_tensor.DebugString(initial_flat.size()).c_str());
         fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
         fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
 
@@ -98,8 +106,6 @@ public:
 
         TensorShape output_shape;
         output_shape.AddDim(output_concat_dim);
-//        fprintf(f, "%d\n", output_shape.dims());
-//        fprintf(f, "%d\n", output_shape.dim_size(0));
 
         // Create an output tensor
         Tensor *output = NULL;
@@ -134,4 +140,3 @@ REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_CPU), BloomCompres
 // #if HOROVOD_GPU_ALLREDUCE
 // REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_GPU),BloomCompressorOp);
 // #endif
-

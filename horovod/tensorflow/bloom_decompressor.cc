@@ -9,7 +9,6 @@
 #include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 #include <string>
 
-
 using namespace tensorflow;
 
 REGISTER_OP("BloomDecompressor")
@@ -17,6 +16,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
 .Attr("logfile_suffix: int")
+.Attr("suffix: int")
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
 .Output("decompressed_tensor: float32")
@@ -50,16 +50,16 @@ REGISTER_OP("BloomDecompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-            bloom::FnvHash32 h;
-            h.Update(&s.b, sizeof(uint8_t));
-            void *buff = malloc(sizeof(uint32_t));
-            memcpy(buff, &s.a, sizeof(uint32_t));
-            h.Update((const uint8_t *) buff, sizeof(uint32_t));
-            free(buff);
-            return h.Digest();
-        }
-    };
+    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+    bloom::FnvHash32 h;
+    h.Update(&s.b, sizeof(uint8_t));
+    void *buff = malloc(sizeof(uint32_t));
+    memcpy(buff, &s.a, sizeof(uint32_t));
+    h.Update((const uint8_t *) buff, sizeof(uint32_t));
+    free(buff);
+    return h.Digest();
+}
+};
 }
 
 void print_vector(int* vec, int size, FILE* f) {
@@ -80,12 +80,13 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));
-
+        OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));
     }
 
     void Compute(OpKernelContext *context) override {
+        std::string str_suffix = std::to_string(logfile_suffix);
+        std::string str = "logs/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
 
-        std::string str = "logs/decompressor_logs_" + std::to_string(logfile_suffix) + ".txt";
         FILE* f = fopen(str.c_str(),"w");
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
@@ -139,6 +140,7 @@ private:
     int hash_num;
     int bloom_size;
     int logfile_suffix;
+    int suffix;
 };
 
 

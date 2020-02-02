@@ -38,7 +38,7 @@ import json
 
 def allreduce(tensor, average=True, device_dense='', device_sparse='',
                    compression=Compression.none,
-                   params = None,
+                   params=None,
                    ):
     """Perform an allreduce on a tf.Tensor or tf.IndexedSlices.
 
@@ -251,6 +251,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                         tensor_compressed = list_tensor_compressed[ranki][0]
                     else:
                         tensor_compressed = list_tensor_compressed[ranki]
+                    params['suffix'] = ranki
                     list_tensor_decompressed.append(
                         compression.decompress(tensor_compressed, ctx, params))
 
@@ -380,13 +381,23 @@ def _make_allreduce_grads_fn(name, device_dense, device_sparse,
                          if grad is not None and isinstance(grad, tf.IndexedSlices)
                          else grad for grad in grads]
 
-            return [allreduce(grad,
+            all_reduce_list = []
+            for i, grad in enumerate(grads):
+
+                params['logfile_suffix'] = i
+                # params['bloom_size'] = bloom_size
+                # Number of hash functions maybe
+
+                if grad is not None:
+                    all_reduce_list.append(allreduce(grad,
                               device_dense=device_dense,
                               device_sparse=device_sparse,
                               compression=compression,
-                              params=params,)
-                    if grad is not None else grad
-                    for grad in grads]
+                              params=params))
+                else:
+                    all_reduce_list.append(grad)
+
+            return all_reduce_list
 
     if _executing_eagerly():
         return _make_subgraph(allreduce_grads)

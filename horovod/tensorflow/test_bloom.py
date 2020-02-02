@@ -18,8 +18,8 @@ hash_num = 2			# Number of hash functions used for bloom filter
 bloom_size = 10			# Size of Bloom Filter
 decompressed_size = 5	# Size of initial tensor
 
-compressed_tensor = bloom_compressor(values, indices, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1)
-decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1)
+compressed_tensor = bloom_compressor(values, indices, init_tensor, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1)
+decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1, suffix=1)
 
 with tf.Session() as sess:
 	print("Initial Tensor: ", sess.run(init_tensor))

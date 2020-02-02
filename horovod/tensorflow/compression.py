@@ -193,9 +193,6 @@ class Bloom_Filter_TopKCompressor(Compressor):
                                                 bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
-        # if compressed_tensor.name == 'DistributedAdamOptimizer_Allreduce/BloomCompressor_1:0':
-        #     compressed_tensor = tf.Print(compressed_tensor, [compressed_tensor], "Compressed_Tensor: ", summarize=100)
-        # compressed_tensor = tf.Print(compressed_tensor, [compressed_tensor], "Compressed_Tensor: ")
         return compressed_tensor, ctx
 
     @staticmethod
@@ -210,14 +207,10 @@ class Bloom_Filter_TopKCompressor(Compressor):
         bloom_decompressor = library.bloom_decompressor
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size, hash_num=params['hash_num'],
-                                                bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'])
-
-        params['logfile_suffix'] = params['logfile_suffix']+1
+                                                bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'],
+                                                suffix=params['suffix'])
 
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
-        # if decompressed_tensor.name == 'DistributedAdamOptimizer_Allreduce/BloomDecompressor_1:0':
-        #     decompressed_tensor = tf.Print(decompressed_tensor, [decompressed_tensor], "Decompressed_Tensor: ", summarize=100)
-        # decompressed_tensor = tf.Print(decompressed_tensor, [decompressed_tensor], "Decompressed_Tensor: ")
         return decompressed_tensor
 
 
