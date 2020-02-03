@@ -173,13 +173,24 @@ class Bloom_Filter_TopKCompressor(Compressor):
     def compress(tensor, params):
 
         tensor_shape = tf.shape(tensor)
-
-        # Consider not flattening since this happens in compressor too
         tensor_flatten = tf.reshape(tensor, [-1])
         elemnum = tensor_flatten.get_shape().as_list()[0]
 
         compress_ratio = params["compress_ratio"]
         k = max(1, int(elemnum * compress_ratio))
+
+        # Optimal bloom filter size and number of hashes
+        # https://gist.github.com/brandt/8f9ab3ceae37562a2841
+        if "bloom_size" not in params:
+            # Compute optimal Bloom Size for given tensor
+            fpr = 0.01  # Acceptable false positive rate
+            m = (k * tf.math.abs(tf.math.log(fpr))) / (tf.math.pow(tf.math.log(2.0),2))
+            params['bloom_size'] = tf.dtypes.cast(tf.math.ceil(m), tf.int32)
+
+        if "hash_functions" not in params:
+            # Compute optimal number of has functions for given tensor
+            h = (m / k) * tf.math.log(2.0)
+            params['hash_num'] = tf.dtypes.cast(tf.math.ceil(h), tf.int32)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         values = tf.gather(tensor_flatten, indices)

@@ -385,37 +385,6 @@ def _make_allreduce_grads_fn(name, device_dense, device_sparse,
             for i, grad in enumerate(grads):
 
                 params['logfile_suffix'] = i
-                # if params['bloom_size'] is set then nothing else params['bloom_size']===calculate optimal...
-                # if params['hash_functions'] is set then nothing else params['hash_functions']===calculate optimal
-
-                # Number of hash functions maybe
-                # Optimal bloom filter size and number of hashes
-                # # https://gist.github.com/brandt/8f9ab3ceae37562a2841
-                # # Tips:
-                # # 1. One byte per item in the input set gives about a 2% false positive rate.
-                # # 2. The optimal number of hash functions is ~0.7x the number of bits per item.
-                # # 3. The number of hashes dominates performance.
-                #
-                # # Expected number of items in the collection
-                # # n = (m * ln(2))/k;
-                # n = 300_000
-                #
-                # # Acceptable false-positive rate (0.01 = 1%)
-                # # p = e^(-(m/n) * (ln(2)^2));
-                # fpr = 0.01
-                #
-                # # Optimal size (number of elements in the bit array)
-                # # m = -((n*ln(p))/(ln(2)^2));
-                # m = (n * Math.log(fpr).abs) / (Math.log(2) ** 2)
-                #
-                # # Optimal number of hash functions
-                # # k = (m/n) * ln(2);
-                # k = (m / n) * Math.log(2)
-                #
-                # puts
-                # "Optimal bloom filter size: #{m.ceil} bits"
-                # puts
-                # "Optimal number of hash functions: #{k.ceil}"
 
                 if grad is not None:
                     all_reduce_list.append(allreduce(grad,
