@@ -106,7 +106,7 @@ public:
         int *values_vec = (int*) malloc(values_size*sizeof(int));       // Todo: to bits
         memcpy(values_vec, compressed_tensor_flat.data(), values_size*sizeof(int));
 //        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
-
+        fprintf(f, "Bloom size: = %d\n", bloom_size);
         fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
         fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
 

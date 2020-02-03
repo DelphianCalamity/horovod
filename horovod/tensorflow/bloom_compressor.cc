@@ -102,6 +102,7 @@ public:
         const std::vector<bool> &bloom_vec = bloom.Get_bloom();
 
         int output_concat_dim = values_flat.size() + bloom_size;
+        fprintf(f, "Bloom size: = %d\n", bloom_size);
         fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
 
         TensorShape output_shape;
