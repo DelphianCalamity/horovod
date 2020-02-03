@@ -107,7 +107,7 @@ public:
         memcpy(values_vec, compressed_tensor_flat.data(), values_size*sizeof(int));
 //        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
         fprintf(f, "Bloom size: = %d\n", bloom_size);
-        fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
+//        fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
         fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
 
         bloom::OrdinaryBloomFilter<uint32_t> bloom_filter(hash_num, bloom_size, bloom_vec);
@@ -132,7 +132,8 @@ public:
         }
         free(values_vec);
 
-        fprintf(f, "\n\n########################################################################################\n\n");
+        fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
+        fprintf(f, "########################################################################################\n\n");
 
     }
 
