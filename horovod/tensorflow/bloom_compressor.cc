@@ -19,7 +19,7 @@ REGISTER_OP("BloomCompressor")
 .Attr("logfile_suffix: int")
 .Input("values: T")
 .Input("indices: int32")
-.Input("initial_tensor: int")    // For debugging purposes
+.Input("initial_tensor: int32")    // For debugging purposes
 .Output("compressed_tensor: T")
 
 //Todo: Fix the segfault error below to enable shape inference
