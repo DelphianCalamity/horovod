@@ -19,7 +19,7 @@ REGISTER_OP("BloomCompressor")
 .Attr("logfile_suffix: int")
 .Input("values: T")
 .Input("indices: int32")
-.Input("initial_tensor: float32")    // For debugging purposes
+.Input("initial_tensor: int")    // For debugging purposes
 .Output("compressed_tensor: T")
 
 //Todo: Fix the segfault error below to enable shape inference
@@ -87,7 +87,7 @@ public:
 
         auto values_flat = values.flat<int>();
         auto indices_flat = indices.flat<int>();
-        auto initial_flat = initial_tensor.flat<float>();
+        auto initial_flat = initial_tensor.flat<int>();
 
         fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(initial_flat.size()).c_str());
         fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
