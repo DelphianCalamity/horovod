@@ -194,7 +194,6 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
-
         values = tf.gather(tensor_flatten, indices)
         values = tf.bitcast(values, tf.int32)
 
@@ -203,7 +202,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         bloom_compressor = library.bloom_compressor
 
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
-        compressed_tensor = bloom_compressor(values, indices, log_initial_tensor, hash_num=params['hash_num'],
+        compressed_tensor = bloom_compressor(values, indices, log_initial_tensor, params['step'], hash_num=params['hash_num'],
                                                 bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
@@ -220,7 +219,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         library = load_library.load_op_library(filename)
         bloom_decompressor = library.bloom_decompressor
 
-        decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size, hash_num=params['hash_num'],
+        decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size, params['step'], hash_num=params['hash_num'],
                                                 bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'],
                                                 suffix=params['suffix'])
 

@@ -20,6 +20,7 @@ REGISTER_OP("BloomCompressor")
 .Input("values: T")
 .Input("indices: int32")
 .Input("initial_tensor: int32")    // For debugging purposes
+.Input("step: int32")
 .Output("compressed_tensor: T")
 
 //Todo: Fix the segfault error below to enable shape inference
@@ -75,19 +76,26 @@ public:
 
     void Compute(OpKernelContext *context) override {
 
-        std::string suffix = std::to_string(logfile_suffix);
-        std::string cmd = "mkdir -p logs/" + suffix;
-        system(cmd.c_str());
-        std::string str = "logs/" + suffix + "/compressor_logs_" + suffix + ".txt";
-        FILE* f = fopen(str.c_str(),"w");
         // Retrieving Inputs
         const Tensor &values = context->input(0);
         const Tensor &indices = context->input(1);
         const Tensor &initial_tensor = context->input(2);
+        const Tensor &step_tensor = context->input(3);
 
         auto values_flat = values.flat<int>();
         auto indices_flat = indices.flat<int>();
         auto initial_flat = initial_tensor.flat<int>();
+        auto step = step_tensor.flat<int>();
+
+        std::string suffix = std::to_string(logfile_suffix);
+        std::string str_step = std::to_string(step(0));
+
+        std::string cmd = "mkdir -p logs/step_" + str_step + "/" + suffix;
+        system(cmd.c_str());
+        std::string str = "logs/step_" + str_step + "/" + suffix + "/compressor_logs_" + suffix + ".txt";
+        FILE* f = fopen(str.c_str(),"w");
+
+
 
         fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(initial_flat.size()).c_str());
         fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());

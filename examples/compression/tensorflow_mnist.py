@@ -118,7 +118,7 @@ def main(_):
     params['bloom_size'] = args.bloom_size
     params['hash_num'] = args.hash_functions
     params['logfile_suffix'] = 0
-
+    params['step'] = tf.placeholder(tf.int32, name='step')
 
     # Horovod: initialize Horovod.
     hvd.init()
@@ -193,10 +193,12 @@ def main(_):
     with tf.train.MonitoredTrainingSession(checkpoint_dir=checkpoint_dir,
                                            hooks=hooks,
                                            config=config) as mon_sess:
+        step_=0
         while not mon_sess.should_stop():
             # Run a training step synchronously.
             image_, label_ = next(training_batch_generator)
-            mon_sess.run(train_op, feed_dict={image: image_, label: label_})
+            mon_sess.run(train_op, feed_dict={image: image_, label: label_, params['step']:step_})
+            step_=step_+1
 
 
 if __name__ == "__main__":

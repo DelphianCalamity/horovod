@@ -19,6 +19,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("suffix: int")
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
+.Input("step: int32")
 .Output("decompressed_tensor: int32")
 /*
 //Todo: Fix the segfault error below to enable shape inference
@@ -84,15 +85,23 @@ public:
     }
 
     void Compute(OpKernelContext *context) override {
-        std::string str_suffix = std::to_string(logfile_suffix);
-        std::string str = "logs/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
 
-        FILE* f = fopen(str.c_str(),"w");
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
-        auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bits
         const Tensor &decompressed_size_tensor = context->input(1);
+        const Tensor &step_tensor = context->input(3);
+
+        auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bits
         auto decompressed_size_flat = decompressed_size_tensor.flat<int>();
+        auto step = step_tensor.flat<int>();
+
+
+        std::string str_suffix = std::to_string(logfile_suffix);
+        std::string str_step = std::to_string(step(0));
+
+        std::string str = "logs/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
+
+        FILE* f = fopen(str.c_str(),"w");
 
         int values_size = compressed_tensor_flat.size()-bloom_size;
         int decompressed_size = *decompressed_size_flat.data();

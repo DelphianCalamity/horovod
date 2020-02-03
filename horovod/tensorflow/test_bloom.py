@@ -21,14 +21,15 @@ hash_num = 2			# Number of hash functions used for bloom filter
 bloom_size = 10			# Size of Bloom Filter
 decompressed_size = 5	# Size of initial tensor
 
-compressed_tensor = bloom_compressor(values, indices, log_init_tensor, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1)
-decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1, suffix=1)
+step=tf.placeholder(tf.int32, name='step')
+compressed_tensor = bloom_compressor(values, indices, log_init_tensor, step, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1)
+decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, step, hash_num=hash_num, bloom_size=bloom_size, logfile_suffix=1, suffix=1)
 
 with tf.Session() as sess:
 	print("Initial Tensor: ", sess.run(init_tensor))
 	print("Values: ", sess.run(values))
 	print("Indices: ", sess.run(indices))
 
-	print("Compressed Tensor: ", sess.run(compressed_tensor))
+	print("Compressed Tensor: ", sess.run(compressed_tensor, feed_dict={step:0}))
 	print("Compressed Tensor Shape: ", compressed_tensor.get_shape())
-	print("Decompressed Tensor", sess.run(decompressed_tensor))
+	print("Decompressed Tensor", sess.run(decompressed_tensor, feed_dict={step:0}))
