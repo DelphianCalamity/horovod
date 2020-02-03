@@ -193,10 +193,10 @@ def main(_):
     with tf.train.MonitoredTrainingSession(checkpoint_dir=checkpoint_dir,
                                            hooks=hooks,
                                            config=config) as mon_sess:
-        # while not mon_sess.should_stop():
+        while not mon_sess.should_stop():
             # Run a training step synchronously.
-        image_, label_ = next(training_batch_generator)
-        mon_sess.run(train_op, feed_dict={image: image_, label: label_})
+            image_, label_ = next(training_batch_generator)
+            mon_sess.run(train_op, feed_dict={image: image_, label: label_})
 
 
 if __name__ == "__main__":
