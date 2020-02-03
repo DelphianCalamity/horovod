@@ -15,27 +15,21 @@ REGISTER_OP("BloomDecompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")                // Todo: Should be set to bits
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
-.Attr("logfile_suffix: int")
-.Attr("suffix: int")
+.Attr("logfile_suffix: int")            // For debugging
+.Attr("suffix: int")                    // For debugging
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
-.Input("step: int32")
+.Input("step: int32")                   // For debugging
 .Output("decompressed_tensor: int32")
 /*
 //Todo: Fix the segfault error below to enable shape inference
 // https://github.com/tensorflow/tensorflow/issues/31335
 //  https://github.com/tensorflow/tensorflow/issues/30494
 
-
 /// .SetShapeFn([](shape_inference::InferenceContext* c) {
 //   return shape_inference::ConcatV2Shape(c);
 //   return shape_inference::ConcatShape(c, c->num_inputs()-1);
 // })
-
-//.SetShapeFn([](shape_inference::InferenceContext* c) {
-//    c->set_output(0, c->input(0));
-//    return Status::OK();
-//})
 */
 .Doc(R"doc(
         Receives a compressed tensor which is a concatenation of values and bloom filter,
@@ -80,8 +74,8 @@ public:
     explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
-        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));
-        OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));
+        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));                       // For debugging
     }
 
     void Compute(OpKernelContext *context) override {
@@ -89,25 +83,12 @@ public:
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
         const Tensor &decompressed_size_tensor = context->input(1);
-        const Tensor &step_tensor = context->input(3);
 
         auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bits
         auto decompressed_size_flat = decompressed_size_tensor.flat<int>();
-        auto step = step_tensor.flat<int>();
-
-
-        std::string str_suffix = std::to_string(logfile_suffix);
-        std::string str_step = std::to_string(step(0));
-
-        std::string str = "logs/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
-
-        FILE* f = fopen(str.c_str(),"w");
 
         int values_size = compressed_tensor_flat.size()-bloom_size;
         int decompressed_size = *decompressed_size_flat.data();
-
-        fprintf(f, "compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
-        fprintf(f, "decompressed size: %d\n\n", decompressed_size);
 
         // Reconstruct the bloom filter
         int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));         // Todo: to bits
@@ -115,10 +96,8 @@ public:
 
         int *values_vec = (int*) malloc(values_size*sizeof(int));       // Todo: to bits
         memcpy(values_vec, compressed_tensor_flat.data(), values_size*sizeof(int));
-//        std::copy_n(compressed_tensor_flat.data(), bloom_size, );
-        fprintf(f, "Bloom size: = %d\n", bloom_size);
-//        fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
-        fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
+
+        // std::copy_n(compressed_tensor_flat.data(), bloom_size, );
 
         bloom::OrdinaryBloomFilter<uint32_t> bloom_filter(hash_num, bloom_size, bloom_vec);
         free(bloom_vec);
@@ -146,16 +125,35 @@ public:
         }
         free(values_vec);
 
-        fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
-        fprintf(f, "########################################################################################\n\n");
+        // *********************** For Debugging ********************** //
 
+        const Tensor &step_tensor = context->input(2);
+        auto step = step_tensor.flat<int>();
+        if (step(0) % 100 == 0 ) {        // Log every 100 iterations
+            std::string str_suffix = std::to_string(logfile_suffix);
+            std::string str_step = std::to_string(step(0));
+            std::string str = "logs/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
+            FILE* f = fopen(str.c_str(),"w");
+            if (f==NULL) {
+                perror ("Can't open file");
+            }
+            fprintf(f, "compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
+            fprintf(f, "decompressed size: %d\n\n", decompressed_size);
+            fprintf(f, "Bloom size: = %d\n", bloom_size);
+            // fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
+            fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
+            fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
+            fprintf(f, "########################################################################################\n\n");
+            fclose (f);
+        }
+        // *********************** For Debugging ********************** //
     }
 
 private:
     int hash_num;
     int bloom_size;
-    int logfile_suffix;
-    int suffix;
+    int logfile_suffix; // For debugging
+    int suffix;         // For debugging
 };
 
 

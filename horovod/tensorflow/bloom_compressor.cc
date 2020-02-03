@@ -19,24 +19,18 @@ REGISTER_OP("BloomCompressor")
 .Attr("logfile_suffix: int")
 .Input("values: T")
 .Input("indices: int32")
-.Input("initial_tensor: int32")    // For debugging purposes
-.Input("step: int32")
+.Input("initial_tensor: int32")    // For debugging
+.Input("step: int32")              // For debugging
 .Output("compressed_tensor: T")
 
 //Todo: Fix the segfault error below to enable shape inference
 // https://github.com/tensorflow/tensorflow/issues/31335
 //  https://github.com/tensorflow/tensorflow/issues/30494
 
-
 /// .SetShapeFn([](shape_inference::InferenceContext* c) {
 //   return shape_inference::ConcatV2Shape(c);
 //   return shape_inference::ConcatShape(c, c->num_inputs()-1);
 // })
-
-//.SetShapeFn([](shape_inference::InferenceContext* c) {
-//    c->set_output(0, c->input(0));
-//    return Status::OK();
-//})
 .Doc(R"doc(
         Receives 'values' and 'indices' as inputs and builds a bloom filter on the indices.
         Returns a tensor wich is the concatenation of the values and the bloom filter
@@ -71,7 +65,7 @@ public:
     explicit BloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
-        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));
+        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
     }
 
     void Compute(OpKernelContext *context) override {
@@ -79,39 +73,17 @@ public:
         // Retrieving Inputs
         const Tensor &values = context->input(0);
         const Tensor &indices = context->input(1);
-        const Tensor &initial_tensor = context->input(2);
-        const Tensor &step_tensor = context->input(3);
 
         auto values_flat = values.flat<int>();
         auto indices_flat = indices.flat<int>();
-        auto initial_flat = initial_tensor.flat<int>();
-        auto step = step_tensor.flat<int>();
-
-        std::string suffix = std::to_string(logfile_suffix);
-        std::string str_step = std::to_string(step(0));
-
-        std::string cmd = "mkdir -p logs/step_" + str_step + "/" + suffix;
-        system(cmd.c_str());
-        std::string str = "logs/step_" + str_step + "/" + suffix + "/compressor_logs_" + suffix + ".txt";
-        FILE* f = fopen(str.c_str(),"w");
-
-
-
-        fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(initial_flat.size()).c_str());
-        fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
-        fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
         for (int i = 0; i < indices_flat.size(); ++i) {
             bloom.Insert(indices_flat(i));
         }
-
         const std::vector<bool> &bloom_vec = bloom.Get_bloom();
-
         int output_concat_dim = values_flat.size() + bloom_size;
-        fprintf(f, "Bloom size: = %d\n", bloom_size);
-        fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
 
         TensorShape output_shape;
         output_shape.AddDim(output_concat_dim);
@@ -132,13 +104,44 @@ public:
             output_flat(i) = bloom_vec[j];
         }
 
-        fprintf(f, "\n\n########################################################################################\n\n");
+        // *********************** For Debugging ********************** //
+        const Tensor &step_tensor = context->input(3);
+        auto step = step_tensor.flat<int>();
+
+        if (step(0) % 100 == 0 ) {        // Log every 100 iterations
+            const Tensor &initial_tensor = context->input(2);
+
+            auto initial_flat = initial_tensor.flat<int>();
+
+            std::string suffix = std::to_string(logfile_suffix);
+            std::string str_step = std::to_string(step(0));
+
+            std::string cmd = "mkdir -p logs/step_" + str_step + "/" + suffix + "/";
+            int systemRet = system(cmd.c_str());
+            if(systemRet == -1){
+                perror("mkdir failed");
+            }
+            std::string str = "logs/step_" + str_step + "/" + suffix + "/compressor_logs_" + suffix + ".txt";
+            FILE* f = fopen(str.c_str(),"w");
+            if (f==NULL) {
+                perror ("Can't open file");
+            }
+            fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(initial_flat.size()).c_str());
+            fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
+            fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
+            fprintf(f, "Bloom size: = %d\n", bloom_size);
+            fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
+            fprintf(f, "\n\n########################################################################################\n\n");
+            fclose (f);
+        }
+        // *********************** For Debugging ********************** //
+
     }
 
 private:
     int hash_num;
     int bloom_size;
-    int logfile_suffix;
+    int logfile_suffix;     // For debugging
 };
 
 

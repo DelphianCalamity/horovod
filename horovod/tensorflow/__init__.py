@@ -369,11 +369,11 @@ if _SessionRunHook is not None and _get_default_graph is not None:
             session.run(self.bcast_op)
 
 
-@_cache
+# @_cache
 def _make_allreduce_grads_fn(name, device_dense, device_sparse,
                              compression, sparse_as_dense, params):
-    if type(params)==str:
-        params = json.loads(params)
+    # if type(params)==str:
+    #     params = json.loads(params)
     def allreduce_grads(grads):
         with tf.name_scope(name + "_Allreduce"):
             if sparse_as_dense:
@@ -496,8 +496,8 @@ def DistributedOptimizer(optimizer, name=None, use_locking=False, device_dense='
         performance and memory utilization if the original sparse gradient
         has high density.  Defaults to false.
     """
-    if type(params) == dict:
-        params = json.dumps(params)
+    # if type(params) == dict:
+    #     params = json.dumps(params)
     if isinstance(optimizer, _LegacyOptimizer):
         return _DistributedOptimizer(optimizer, name, use_locking, device_dense,
                                      device_sparse, compression, sparse_as_dense, params)
