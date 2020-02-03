@@ -19,7 +19,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("suffix: int")
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
-.Output("decompressed_tensor: float32")
+.Output("decompressed_tensor: int32")
 /*
 //Todo: Fix the segfault error below to enable shape inference
 // https://github.com/tensorflow/tensorflow/issues/31335
@@ -119,15 +119,15 @@ public:
         // Create an output tensor
         Tensor *decompressed_tensor = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, decompressed_tensor_shape, &decompressed_tensor));
-        auto decompressed_tensor_flat = decompressed_tensor->template flat<float>();
+        auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
 
         // Decode the compressed tensor
         for (int i=0,j=0; j<values_size; ++i) {
             if (bloom_filter.Query(i)) {
-                decompressed_tensor_flat(i) = (float) values_vec[j];
+                decompressed_tensor_flat(i) = values_vec[j];
                 j++;
             } else {
-                decompressed_tensor_flat(i) = 0.0;
+                decompressed_tensor_flat(i) = 0;
             }
         }
         free(values_vec);

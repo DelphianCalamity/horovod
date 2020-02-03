@@ -224,6 +224,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
                                                 bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'],
                                                 suffix=params['suffix'])
 
+        decompressed_tensor = tf.bitcast(decompressed_tensor, tf.float32)
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
         return decompressed_tensor
 
