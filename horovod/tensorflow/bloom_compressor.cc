@@ -89,7 +89,7 @@ public:
         auto indices_flat = indices.flat<int>();
         auto initial_flat = initial_tensor.flat<float>();
 
-        fprintf(f, "Initial Tensor: %s\n", initial_tensor.DebugString(initial_flat.size()).c_str());
+        fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(initial_flat.size()).c_str());
         fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
         fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
 

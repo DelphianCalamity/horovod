@@ -189,7 +189,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
         library = load_library.load_op_library(filename)
         bloom_compressor = library.bloom_compressor
 
-        compressed_tensor = bloom_compressor(values, indices, tensor_flatten, hash_num=params['hash_num'],
+        log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
+        compressed_tensor = bloom_compressor(values, indices, log_initial_tensor, hash_num=params['hash_num'],
                                                 bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
