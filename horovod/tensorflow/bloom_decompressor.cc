@@ -91,13 +91,14 @@ public:
         // Retrieving Inputs
         const Tensor &compressed_tensor = context->input(0);
         auto compressed_tensor_flat = compressed_tensor.flat<int>();   // Todo: Expect bits
-        const Tensor &decompressed_size = context->input(1);
-        auto decompressed_size_flat = decompressed_size.flat<int>();
+        const Tensor &decompressed_size_tensor = context->input(1);
+        auto decompressed_size_flat = decompressed_size_tensor.flat<int>();
 
         int values_size = compressed_tensor_flat.size()-bloom_size;
+        int decompressed_size = *decompressed_size_flat.data();
 
         fprintf(f, "compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
-        fprintf(f, "decompressed size: %s\n\n\n", decompressed_size.DebugString(decompressed_size_flat.size()).c_str());
+        fprintf(f, "decompressed size: %d\n\n", decompressed_size);
 
         // Reconstruct the bloom filter
         int *bloom_vec = (int*) malloc(bloom_size*sizeof(int));         // Todo: to bits
@@ -114,7 +115,7 @@ public:
         free(bloom_vec);
 
         TensorShape decompressed_tensor_shape;
-        decompressed_tensor_shape.AddDim(*decompressed_size_flat.data());
+        decompressed_tensor_shape.AddDim(decompressed_size);
 
         // Create an output tensor
         Tensor *decompressed_tensor = NULL;
@@ -122,13 +123,17 @@ public:
         auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
 
         // Decode the compressed tensor
-        for (int i=0,j=0; j<values_size; ++i) {
+        int i,j;
+        for (i=0,j=0; j<values_size; ++i) {
             if (bloom_filter.Query(i)) {
                 decompressed_tensor_flat(i) = values_vec[j];
                 j++;
             } else {
                 decompressed_tensor_flat(i) = 0;
             }
+        }
+        for (; i<decompressed_size; ++i) {
+            decompressed_tensor_flat(i) = 0;
         }
         free(values_vec);
 
