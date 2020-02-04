@@ -46,20 +46,20 @@ def make_args_parser():
         "-bs",
         "--bloom_size",
         type=int,
-        default=1000,
+        default=None,
         help="size of the bloom filter",
     )
     parser.add_argument(
         '-hf',
         '--hash_functions',
         type=int,
-        default=4,
+        default=None,
         help="Number of hash functions")
     parser.add_argument(
         '-v',
         '--verbosity',
         type=int,
-        default=1000,
+        default=0,
         help="bloom filter operators logging frequency")
     return parser.parse_args()
 
@@ -122,7 +122,7 @@ def main(_):
     params['compress_method'] = args.compress_method    # "bloom_topk"
     params['compress_state'] = args.compress_state  # True
     params['bloom_size'] = args.bloom_size
-    params['hash_num'] = args.hash_functions
+    params['hash_functions'] = args.hash_functions
     params['logfile_suffix'] = 0
     params['verbosity'] = args.verbosity
     params['step'] = tf.placeholder(tf.int32, name='step')

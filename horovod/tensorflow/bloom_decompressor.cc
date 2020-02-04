@@ -131,7 +131,7 @@ public:
 
         const Tensor &step_tensor = context->input(2);
         auto step = step_tensor.flat<int>();
-        if (step(0) % verbosity == 0 ) {        // Log every 100 iterations
+        if (verbosity != 0 && step(0) % verbosity == 0 ) {        // Log every 100 iterations
             std::string str_suffix = std::to_string(logfile_suffix);
             std::string str_step = std::to_string(step(0));
             std::string str = "logs/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";

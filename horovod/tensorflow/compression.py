@@ -181,16 +181,16 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         # Optimal bloom filter size and number of hashes
         # https://gist.github.com/brandt/8f9ab3ceae37562a2841
-        if "bloom_size" not in params:
+        if params["bloom_size"] is None:
             # Compute optimal Bloom Size for given tensor
             fpr = 0.01  # Acceptable false positive rate
             m = (k * tf.math.abs(tf.math.log(fpr))) / (tf.math.pow(tf.math.log(2.0),2))
             params['bloom_size'] = tf.dtypes.cast(tf.math.ceil(m), tf.int32)
 
-        if "hash_num" not in params:
+        if params["hash_functions"] is None:
             # Compute optimal number of has functions for given tensor
             h = (m / k) * tf.math.log(2.0)
-            params['hash_num'] = tf.dtypes.cast(tf.math.ceil(h), tf.int32)
+            params['hash_functions'] = tf.dtypes.cast(tf.math.ceil(h), tf.int32)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
@@ -204,7 +204,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
         compressed_tensor = bloom_compressor(values, indices,
                                              log_initial_tensor, params['step'],
-                                             hash_num=params['hash_num'],
+                                             hash_num=params['hash_functions'],
                                              bloom_size=params['bloom_size'],
                                              logfile_suffix=params['logfile_suffix'],
                                              verbosity=params['verbosity'])
@@ -224,8 +224,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
         bloom_decompressor = library.bloom_decompressor
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
-                                                 params['step'],
-                                                 hash_num=params['hash_num'],
+                                                 tf.train.get_or_create_global_step(),
+                                                 hash_num=params['hash_functions'],
                                                  bloom_size=params['bloom_size'],
                                                  logfile_suffix=params['logfile_suffix'],
                                                  suffix=params['suffix'],

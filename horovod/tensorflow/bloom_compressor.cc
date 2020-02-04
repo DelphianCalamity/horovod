@@ -110,7 +110,7 @@ public:
         const Tensor &step_tensor = context->input(3);
         auto step = step_tensor.flat<int>();
 
-        if (step(0) % verbosity == 0 ) {        // Log every 100 iterations
+        if (verbosity != 0 && step(0) % verbosity == 0 ) {        // Log every 100 iterations
             const Tensor &initial_tensor = context->input(2);
 
             auto initial_flat = initial_tensor.flat<int>();
