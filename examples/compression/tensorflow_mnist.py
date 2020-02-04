@@ -55,6 +55,12 @@ def make_args_parser():
         type=int,
         default=4,
         help="Number of hash functions")
+    parser.add_argument(
+        '-v',
+        '--verbosity',
+        type=int,
+        default=1000,
+        help="bloom filter operators logging frequency")
     return parser.parse_args()
 
 
@@ -118,7 +124,7 @@ def main(_):
     params['bloom_size'] = args.bloom_size
     params['hash_num'] = args.hash_functions
     params['logfile_suffix'] = 0
-    params['verbosity'] = 1000
+    params['verbosity'] = args.verbosity
     params['step'] = tf.placeholder(tf.int32, name='step')
 
 
