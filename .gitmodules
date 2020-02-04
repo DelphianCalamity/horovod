@@ -55,3 +55,6 @@
 [submodule "third_party/bloomfilter"]
 	path = third_party/bloomfilter
 	url = https://github.com/DelphianCalamity/bloomfilter.git
+[submodule "third_party/benchmarks"]
+	path = third_party/benchmarks
+	url = https://github.com/DelphianCalamity/benchmarks.git
