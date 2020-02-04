@@ -118,7 +118,9 @@ def main(_):
     params['bloom_size'] = args.bloom_size
     params['hash_num'] = args.hash_functions
     params['logfile_suffix'] = 0
+    params['verbosity'] = 1000
     params['step'] = tf.placeholder(tf.int32, name='step')
+
 
     # Horovod: initialize Horovod.
     hvd.init()

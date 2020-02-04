@@ -17,6 +17,7 @@ REGISTER_OP("BloomCompressor")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
 .Attr("logfile_suffix: int")
+.Attr("verbosity: int")            // For debugging
 .Input("values: T")
 .Input("indices: int32")
 .Input("initial_tensor: int32")    // For debugging
@@ -66,6 +67,7 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));       // For debugging
     }
 
     void Compute(OpKernelContext *context) override {
@@ -108,7 +110,7 @@ public:
         const Tensor &step_tensor = context->input(3);
         auto step = step_tensor.flat<int>();
 
-        if (step(0) % 100 == 0 ) {        // Log every 100 iterations
+        if (step(0) % verbosity == 0 ) {        // Log every 100 iterations
             const Tensor &initial_tensor = context->input(2);
 
             auto initial_flat = initial_tensor.flat<int>();
@@ -142,6 +144,7 @@ private:
     int hash_num;
     int bloom_size;
     int logfile_suffix;     // For debugging
+    int verbosity;          // For debugging
 };
 
 

@@ -17,6 +17,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("bloom_size: int")
 .Attr("logfile_suffix: int")            // For debugging
 .Attr("suffix: int")                    // For debugging
+.Attr("verbosity: int")                 // For debugging
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
 .Input("step: int32")                   // For debugging
@@ -76,6 +77,7 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));                       // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                       // For debugging
     }
 
     void Compute(OpKernelContext *context) override {
@@ -129,7 +131,7 @@ public:
 
         const Tensor &step_tensor = context->input(2);
         auto step = step_tensor.flat<int>();
-        if (step(0) % 100 == 0 ) {        // Log every 100 iterations
+        if (step(0) % verbosity == 0 ) {        // Log every 100 iterations
             std::string str_suffix = std::to_string(logfile_suffix);
             std::string str_step = std::to_string(step(0));
             std::string str = "logs/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
@@ -154,6 +156,7 @@ private:
     int bloom_size;
     int logfile_suffix; // For debugging
     int suffix;         // For debugging
+    int verbosity;      // For debugging
 };
 
 

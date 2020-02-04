@@ -202,8 +202,12 @@ class Bloom_Filter_TopKCompressor(Compressor):
         bloom_compressor = library.bloom_compressor
 
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
-        compressed_tensor = bloom_compressor(values, indices, log_initial_tensor, params['step'], hash_num=params['hash_num'],
-                                                bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'])
+        compressed_tensor = bloom_compressor(values, indices,
+                                             log_initial_tensor, params['step'],
+                                             hash_num=params['hash_num'],
+                                             bloom_size=params['bloom_size'],
+                                             logfile_suffix=params['logfile_suffix'],
+                                             verbosity=params['verbosity'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
         return compressed_tensor, ctx
@@ -219,9 +223,13 @@ class Bloom_Filter_TopKCompressor(Compressor):
         library = load_library.load_op_library(filename)
         bloom_decompressor = library.bloom_decompressor
 
-        decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size, params['step'], hash_num=params['hash_num'],
-                                                bloom_size=params['bloom_size'], logfile_suffix=params['logfile_suffix'],
-                                                suffix=params['suffix'])
+        decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
+                                                 params['step'],
+                                                 hash_num=params['hash_num'],
+                                                 bloom_size=params['bloom_size'],
+                                                 logfile_suffix=params['logfile_suffix'],
+                                                 suffix=params['suffix'],
+                                                 verbosity=params['verbosity'])
 
         decompressed_tensor = tf.bitcast(decompressed_tensor, tf.float32)
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
