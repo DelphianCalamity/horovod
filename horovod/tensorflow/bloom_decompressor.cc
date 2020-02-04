@@ -20,7 +20,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("verbosity: int")                 // For debugging
 .Input("compressed_tensor: T")
 .Input("decompressed_size: int32")
-.Input("step: int32")                   // For debugging
+.Input("step: int64")                   // For debugging
 .Output("decompressed_tensor: int32")
 /*
 //Todo: Fix the segfault error below to enable shape inference
@@ -130,7 +130,7 @@ public:
         // *********************** For Debugging ********************** //
 
         const Tensor &step_tensor = context->input(2);
-        auto step = step_tensor.flat<int>();
+        auto step = step_tensor.flat<int64>();
         if (verbosity != 0 && step(0) % verbosity == 0 ) {        // Log every 100 iterations
             std::string str_suffix = std::to_string(logfile_suffix);
             std::string str_step = std::to_string(step(0));
