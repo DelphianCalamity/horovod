@@ -203,7 +203,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
         compressed_tensor = bloom_compressor(values, indices,
-                                             log_initial_tensor, params['step'],
+                                             log_initial_tensor, tf.train.get_or_create_global_step(),
                                              hash_num=params['hash_functions'],
                                              bloom_size=params['bloom_size'],
                                              logfile_suffix=params['logfile_suffix'],
