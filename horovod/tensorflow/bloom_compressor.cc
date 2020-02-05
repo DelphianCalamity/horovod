@@ -21,7 +21,7 @@ REGISTER_OP("BloomCompressor")
 .Input("values: T")
 .Input("indices: int32")
 .Input("initial_tensor: int32")    // For debugging
-.Input("step: int32")              // For debugging
+.Input("step: int64")              // For debugging
 .Output("compressed_tensor: T")
 
 //Todo: Fix the segfault error below to enable shape inference
@@ -108,7 +108,7 @@ public:
 
         // *********************** For Debugging ********************** //
         const Tensor &step_tensor = context->input(3);
-        auto step = step_tensor.flat<int>();
+        auto step = step_tensor.flat<int64>();
 
         if (verbosity != 0 && step(0) % verbosity == 0 ) {        // Log every 100 iterations
             const Tensor &initial_tensor = context->input(2);
