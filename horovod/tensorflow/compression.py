@@ -179,18 +179,25 @@ class Bloom_Filter_TopKCompressor(Compressor):
         compress_ratio = params["compress_ratio"]
         k = max(1, int(elemnum * compress_ratio))
 
-        # Optimal bloom filter size and number of hashes
+        # Bloom filter size and number of hashes
         # https://gist.github.com/brandt/8f9ab3ceae37562a2841
-        if params["bloom_size"] is None:
-            # Compute optimal Bloom Size for given tensor
-            fpr = 0.01      # Acceptable false positive rate
-            m = (k * abs(math.log(fpr))) / (math.pow(math.log(2), 2))
-            params['bloom_size'] = int(math.ceil(m))
 
-        if params["hash_functions"] is None:
-            # Compute optimal number of has functions for given tensor
+        # Configure bloom filter's m, k values
+        if params["bloom_size"] is not None:
+            pass
+            # todo
+        elif params["hash_functions"] is not None:
+            pass
+            #todo
+
+        elif params["fpr"] is not None:
+            m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
+            params['m'] = int(math.ceil(m))
             h = (m / k) * math.log(2)
-            params['hash_functions'] = int(math.ceil(h))
+            params['k'] = int(math.ceil(h))
+
+        else:
+            exit(1)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
@@ -203,9 +210,10 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
         compressed_tensor = bloom_compressor(values, indices,
-                                             log_initial_tensor, tf.train.get_or_create_global_step(),
-                                             hash_num=params['hash_functions'],
-                                             bloom_size=params['bloom_size'],
+                                             log_initial_tensor,
+                                             tf.train.get_or_create_global_step(),
+                                             hash_num=params['k'],
+                                             bloom_size=params['m'],
                                              logfile_suffix=params['logfile_suffix'],
                                              verbosity=params['verbosity'])
         ctx = tensor_shape
@@ -225,8 +233,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
                                                  tf.train.get_or_create_global_step(),
-                                                 hash_num=params['hash_functions'],
-                                                 bloom_size=params['bloom_size'],
+                                                 hash_num=params['k'],
+                                                 bloom_size=params['m'],
                                                  logfile_suffix=params['logfile_suffix'],
                                                  suffix=params['suffix'],
                                                  verbosity=params['verbosity'])

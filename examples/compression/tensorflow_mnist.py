@@ -45,7 +45,7 @@ def make_args_parser():
     parser.add_argument(
         "-bs",
         "--bloom_size",
-        type=int,
+        type=float,
         default=0,
         help="size of the bloom filter",
     )
@@ -56,11 +56,17 @@ def make_args_parser():
         default=0,
         help="Number of hash functions")
     parser.add_argument(
+        '-fpr',
+        '--false_positive_rate',
+        type=float,
+        default=0,
+        help="False positive rate")
+    parser.add_argument(
         '-v',
         '--verbosity',
         type=int,
         default=0,
-        help="bloom filter operators logging frequency")
+        help="Bloom filter operators logging frequency")
     return parser.parse_args()
 
 
@@ -123,6 +129,7 @@ def main(_):
     params['compress_state'] = args.compress_state
     params['bloom_size'] = args.bloom_size if args.bloom_size > 0 else None
     params['hash_functions'] = args.hash_functions if args.hash_functions > 0 else None
+    params['fpr'] = args.false_positive_rate if args.false_positive_rate > 0 else None
     params['verbosity'] = args.verbosity
 
 
