@@ -183,14 +183,14 @@ class Bloom_Filter_TopKCompressor(Compressor):
         # https://gist.github.com/brandt/8f9ab3ceae37562a2841
         if params["bloom_size"] is None:
             # Compute optimal Bloom Size for given tensor
-            fpr = 0.01  # Acceptable false positive rate
-            m = (k * tf.math.abs(tf.math.log(fpr))) / (tf.math.pow(tf.math.log(2.0),2))
-            params['bloom_size'] = tf.dtypes.cast(tf.math.ceil(m), tf.int32)
+            fpr = 0.01      # Acceptable false positive rate
+            m = (k * abs(math.log(fpr))) / (math.pow(math.log(2), 2))
+            params['bloom_size'] = int(math.ceil(m))
 
         if params["hash_functions"] is None:
             # Compute optimal number of has functions for given tensor
-            h = (m / k) * tf.math.log(2.0)
-            params['hash_functions'] = tf.dtypes.cast(tf.math.ceil(h), tf.int32)
+            h = (m / k) * math.log(2)
+            params['hash_functions'] = int(math.ceil(h))
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
