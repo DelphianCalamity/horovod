@@ -46,17 +46,15 @@ REGISTER_OP("BloomDecompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-    bloom::FnvHash32 h;
-    h.Update(&s.b, sizeof(uint8_t));
-    void *buff = malloc(sizeof(uint32_t));
-    memcpy(buff, &s.a, sizeof(uint32_t));
-    h.Update((const uint8_t *) buff, sizeof(uint32_t));
-    free(buff);
-    return h.Digest();
+        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+            bloom::FnvHash32 h;
+            h.Update(s.b);      // casting uint8_t to int
+            h.Update(s.a);
+            return h.Digest();
+        }
+    };
 }
-};
-}
+
 
 void print_vector(int* vec, int size, FILE* f) {
     fprintf(f, "\n[");
@@ -102,7 +100,6 @@ public:
         // std::copy_n(compressed_tensor_flat.data(), bloom_size, );
 
         bloom::OrdinaryBloomFilter<uint32_t> bloom_filter(hash_num, bloom_size, bloom_vec);
-        free(bloom_vec);
 
         TensorShape decompressed_tensor_shape;
         decompressed_tensor_shape.AddDim(decompressed_size);
@@ -125,7 +122,6 @@ public:
         for (; i<decompressed_size; ++i) {
             decompressed_tensor_flat(i) = 0;
         }
-        free(values_vec);
 
         // *********************** For Debugging ********************** //
 
@@ -142,13 +138,16 @@ public:
             fprintf(f, "compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
             fprintf(f, "decompressed size: %d\n\n", decompressed_size);
             fprintf(f, "Bloom size: = %d\n", bloom_size);
-            // fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
+             fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
             fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
             fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
             fprintf(f, "########################################################################################\n\n");
             fclose (f);
         }
         // *********************** For Debugging ********************** //
+
+        free(values_vec);
+        free(bloom_vec);
     }
 
 private:

@@ -1,5 +1,6 @@
 """Gradient compression algorithms."""
 
+from __future__ import division
 import tensorflow as tf
 from tensorflow.python.framework import load_library
 from tensorflow.python.platform import resource_loader
@@ -191,9 +192,9 @@ class Bloom_Filter_TopKCompressor(Compressor):
             #todo
 
         elif params["fpr"] is not None:
-            m = (k * abs(math.log(params["fpr"]))) // (math.pow(math.log(2), 2))
+            m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
             params['m'] = int(math.ceil(m))
-            h = (m // k) * math.log(2)
+            h = (m / k) * math.log(2)
             params['k'] = int(math.ceil(h))
 
         else:

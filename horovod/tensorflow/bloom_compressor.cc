@@ -46,16 +46,13 @@ REGISTER_OP("BloomCompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-    bloom::FnvHash32 h;
-    h.Update(&s.b, sizeof(uint8_t));
-    void *buff = malloc(sizeof(uint32_t));
-    memcpy(buff, &s.a, sizeof(uint32_t));
-    h.Update((const uint8_t *) buff, sizeof(uint32_t));
-    free(buff);
-    return h.Digest();
-}
-};
+        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+            bloom::FnvHash32 h;
+            h.Update(s.b);      // casting uint8_t to int
+            h.Update(s.a);
+            return h.Digest();
+        }
+    };
 }
 
 
@@ -73,11 +70,8 @@ public:
     void Compute(OpKernelContext *context) override {
 
         // Retrieving Inputs
-        const Tensor &values = context->input(0);
-        const Tensor &indices = context->input(1);
-
-        auto values_flat = values.flat<int>();
-        auto indices_flat = indices.flat<int>();
+        const Tensor &values = context->input(0);  auto values_flat = values.flat<int>();
+        const Tensor &indices = context->input(1);  auto indices_flat = indices.flat<int>();
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
