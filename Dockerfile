@@ -95,4 +95,6 @@ RUN apt-get install -y --no-install-recommends subversion && \
     svn checkout https://github.com/horovod/horovod/trunk/examples && \
     rm -rf /examples/.svn
 
+RUN pip install --upgrade wandb
+
 WORKDIR "/examples"

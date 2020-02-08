@@ -185,20 +185,30 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         # Configure bloom filter's m, k values
         if params["bloom_size"] is not None:
-            pass
+            # Given M compute K
             # todo
-        elif params["hash_functions"] is not None:
             pass
+        elif params["hash_functions"] is not None:
+            # Given K compute M
             #todo
+            pass
 
         elif params["fpr"] is not None:
+            # Given FPR compute M and K
             m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
             params['m'] = int(math.ceil(m))
             h = (m / k) * math.log(2)
             params['k'] = int(math.ceil(h))
-
         else:
             exit(1)
+
+        assert params['k'] < 256, "Number of hash functions too big"
+
+        # Log m and k
+        f = open("log_bloom_parameters", "a")
+        f.write("Bloom Size: " + str(params['m']) + " #hash_functions: " + str(params['k']))
+        f.close()
+
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
@@ -209,6 +219,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         library = load_library.load_op_library(filename)
         bloom_compressor = library.bloom_compressor
 
+        # For debugging
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
         compressed_tensor = bloom_compressor(values, indices,
                                              log_initial_tensor,
