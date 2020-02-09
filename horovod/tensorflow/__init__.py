@@ -79,7 +79,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
             'data_name': os.environ.get('HOROVOD_DATA_NAME', 'cifar10'),
             'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True')),
-            'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False'))
+            'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
+            'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2))
         }
 
 
@@ -126,6 +127,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     default_params['average'] = average
     default_params['beta'] = 1.0
     default_params['gamma'] = 1.0
+    default_params['compress_rank'] = 2
 
     if params is None:
         params={}
@@ -143,6 +145,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
     compression = params["compressor"]
     params['tensor_name'] = tensor.name
+    params['tensor_dims'] = len(tensor.get_shape().as_list())
 
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
@@ -273,6 +276,12 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                         compression.decompress(temp, ctx, params))
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
+
+            if params["compress_method"] == "powersgd":
+                tensor_name = params["tensor_name"]
+                m = params["momentum"]
+                momentum = compression.momentum[tensor_name]
+                new_tensor = momentum.assign(momentum * m + new_tensor) + new_tensor
 
             def compression_check_op(new_tensor):
                 h = hash(tensor.name) + tf.train.get_global_step()
