@@ -161,8 +161,10 @@ class TopKCompressor(Compressor):
         values = tf.bitcast(values, tf.float32)
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
-        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32))
-        tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
+        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        with tf.control_dependencies([op]):
+            tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
@@ -211,7 +213,10 @@ class Bloom_Filter_TopKCompressor(Compressor):
         f.close()
 
         wandb.log({"M": params['m']})
+        wandb.log({"Bloom Size": wandb.Histogram(params['m'])})
         wandb.log({"K": params['k']})
+        wandb.log({"# Hash Functions": wandb.Histogram(params['k'])})
+
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
