@@ -7,7 +7,7 @@ from tensorflow.python.platform import resource_loader
 
 import random, math #, mmh3
 from horovod.tensorflow.mpi_ops import _allreduce
-
+import wandb
 
 
 class Compressor(object):
@@ -199,6 +199,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
             params['m'] = int(math.ceil(m))
             h = (m / k) * math.log(2)
             params['k'] = int(math.ceil(h))
+
         else:
             exit(1)
 
@@ -206,9 +207,11 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         # Log m and k
         f = open("log_bloom_parameters", "a")
-        f.write("Bloom Size: " + str(params['m']) + " #hash_functions: " + str(params['k']))
+        f.write("M: " + str(params['m']) + " K: " + str(params['k']))
         f.close()
 
+        wandb.log({"M": params['m']})
+        wandb.log({"K": params['k']})
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
