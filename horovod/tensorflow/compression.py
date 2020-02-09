@@ -1021,8 +1021,12 @@ class NaturalCompressor(Compressor):
                                                    dtype=tf.int32)
         # exp_add_one = mantissa > 0x00400000 # deterministic
         exponent = tf.where(exp_add_one, exp + 0b00000000100000000000000000000000, exp)
+        # original exponent range: -128 ~ 127, clip to -110,  17
+        # view as uint8_t:            0 ~ 255            18  145
         exp_shift = tf.clip_by_value(exponent, 0b00001001000000000000000000000000, 0b01001000100000000000000000000000)
         exps = tf.bitwise.right_shift(exp_shift, 23)
+        # shift 18 so that 0 maps to -110 and 127 maps to 145
+        # set MSB if negative
         exps = tf.bitwise.bitwise_or(tf.bitwise.right_shift(sign, 24), exps - 18)
         tensor_compressed = tf.cast(exps, tf.uint8)
         params['tensors_size_are_same'] = True
