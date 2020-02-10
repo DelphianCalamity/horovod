@@ -537,6 +537,9 @@ class DgcCompressor(Compressor):
         gradient_clipping = params["gradient_clipping"]
         if gradient_clipping:
             tensor_squ_sum = tf.math.reduce_sum(tf.math.square(tensor))
+            if params['debug']:
+                tensor_squ_sum = tf.Print(tensor_squ_sum, [tf.size(tensor_squ_sum)],
+                                          message=f"==Debug== tensor 0/1 on rank {rank()} {tensor_squ_sum.dtype} size:")
             thr_global = tf.math.sqrt(_allreduce(tensor_squ_sum))
             clipping_val = thr_global / tf.math.sqrt(float(horovod_size))
             tensor = tf.clip_by_value(tensor, -clipping_val, clipping_val)
@@ -576,20 +579,25 @@ class DgcCompressor(Compressor):
         mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
 
         selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
+        #selected = tf.Print(selected, ['selected:', selected])
         def body(thr, mask, selected):
-            thr = tf.cond(selected > 1.3 * elemnum * compress_ratio, lambda: 1.3 * thr, lambda: 0.7 * thr)
+            thr = tf.cond(selected > 1.25 * max(1, int(elemnum * compress_ratio)), lambda: 1.25 * thr, lambda: 0.9 * thr)
             mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
             selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
             return thr, mask, selected
 
         def condition(thr, mask, selected):
-            cond_a = selected > 1.3 * elemnum * compress_ratio
-            cond_b = selected < 0.7 * elemnum * compress_ratio
+            cond_a = selected > 1.25 * max(1, int(elemnum * compress_ratio))
+            cond_b = selected < 0.8 * max(1, int(elemnum * compress_ratio))
             return tf.math.logical_or(cond_a, cond_b)
 
-        thr, mask, _ = tf.while_loop(condition, body, (thr, mask, selected), maximum_iterations=20)
+        thr, mask, new_selected = tf.while_loop(condition, body, (thr, mask, selected), maximum_iterations=20)
+
+        thr = tf.cond(new_selected < 1, lambda: 0.8 * thr, lambda: thr)
+        mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
 
         indices = tf.reshape(tf.where(mask), [-1])
+        #indices = tf.Print(indices, ["selected:", selected, new_selected, 'size changes:', tf.size(indices), tf.size(tensor), "ratio:", compress_ratio])
         values = tf.gather(tensor_flatten, indices)
 
         values = tf.bitcast(values, tf.int32)
@@ -643,19 +651,22 @@ class AdaqCompressor(Compressor):
             elemnum = tf.cast(mask_size, dtype=tf.float32)
 
             def body(thr, mask, selected):
-                thr = tf.cond(selected > 1.3 * elemnum * compress_ratio, lambda: 1.3 * thr, lambda: 0.7 * thr)
+                thr = tf.cond(selected > 1.25 * tf.ceil(elemnum * compress_ratio), lambda: 1.25 * thr, lambda: 0.9 * thr)
                 mask = tf.math.greater_equal(tf.math.abs(tensor_masked), thr)
                 selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
                 return thr, mask, selected
 
             def condition(thr, mask, selected):
-                cond_a = selected > 1.3 * elemnum * compress_ratio
-                cond_b = selected < 0.7 * elemnum * compress_ratio
+                cond_a = selected > 1.25 * tf.ceil(elemnum * compress_ratio)
+                cond_b = selected < 0.8 * tf.ceil(elemnum * compress_ratio)
                 return tf.math.logical_or(cond_a, cond_b)
 
             thr2, mask2, selected2 = tf.while_loop(condition, body, (thr, mask, selected), maximum_iterations=20)
+            thr2 = tf.cond(selected2 < 1, lambda: 0.8 * thr2, lambda: thr2)
+            mask2 = tf.math.greater(tf.math.abs(tensor_masked), thr2)
 
             indices = tf.reshape(tf.where(mask2), [-1])
+            #indices = tf.Print(indices, ["selected:", selected2, 'size changes:', tf.size(indices), elemnum, "ratio:", compress_ratio])
             tensor_value2 = tf.boolean_mask(tensor_masked, mask2)
             mean = tf.reshape(tf.math.reduce_mean(tensor_value2), [-1])
 
@@ -813,9 +824,15 @@ class PowerSGDCompressor(Compressor):
         q, _ = tf.linalg.qr(q)
 
         p = tf.linalg.matmul(matrix, q)
+        if params['debug']:
+            p = tf.Print(p, [tf.size(p)],
+                         message=f"==Debug== tensor 0/1 on rank {rank()} {p.dtype} size:")
         p = _allreduce(p) / horovod_size
         p, _ = tf.linalg.qr(p)
         q = tf.linalg.matmul(matrix, p, transpose_a=True)
+        if params['debug']:
+            q = tf.Print(q, [tf.size(q)],
+                         message=f"==Debug== tensor 0/1 on rank {rank()} {q.dtype} size:")
         q = _allreduce(q) / horovod_size
         new_q = cls.q_memory[tensor_name].assign(q)
         ctx = p, new_q, tensor_shape

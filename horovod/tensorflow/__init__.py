@@ -277,7 +277,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
 
-            if params["compress_method"] == "powersgd":
+            if params["compress_method"] == "powersgd" and params['compress_state'] is True:
                 tensor_name = params["tensor_name"]
                 m = params["momentum"]
                 momentum = compression.momentum[tensor_name]
