@@ -27,16 +27,16 @@ _v2_api = LooseVersion(torch.__version__) >= LooseVersion('1.0.0')
 if _v2_api:
     from horovod.torch import mpi_lib_v2 as mpi_lib
     from horovod.common.basics import HorovodBasics as _HorovodBasics
+
     _NULL = ""
     _basics = _HorovodBasics(__file__, 'mpi_lib_v2')
 else:
     from horovod.torch import mpi_lib_impl
     from horovod.torch import mpi_lib
     from horovod.common.basics import HorovodBasics as _HorovodBasics
+
     _NULL = mpi_lib._ffi.NULL
     _basics = _HorovodBasics(__file__, 'mpi_lib_impl', '_mpi_lib_impl')
-
-from horovod.torch.compression import Compression
 
 # import basic methods
 init = _basics.init
@@ -81,7 +81,7 @@ def _allreduce_async(tensor, output, average, name):
     if tensor.dtype == torch.float16 and not _fp16_supported:
         raise NotImplementedError(
             'float16 allreduce is not supported for PyTorch version {} < 1.0.0'
-            .format(torch.__version__))
+                .format(torch.__version__))
 
     function = _check_function(_allreduce_function_factory, tensor)
     handle = getattr(mpi_lib, function)(tensor, output, average,
@@ -128,7 +128,7 @@ class HorovodAllreduce(torch.autograd.Function):
         return allreduce(grad_output, ctx.average), None, None
 
 
-def allreduce(tensor, average=True, name=None, compression=Compression.none):
+def allreduce(tensor, average=True, name=None):
     """
     A function that performs averaging or summation of the input tensor over all the
     Horovod processes. The input tensor is not modified.
@@ -155,9 +155,7 @@ def allreduce(tensor, average=True, name=None, compression=Compression.none):
         A tensor of the same shape and type as `tensor`, averaged or summed across all
         processes.
     """
-    tensor_compressed, ctx = compression.compress(tensor)
-    summed_tensor_compressed = HorovodAllreduce.apply(tensor_compressed, average, name)
-    return compression.decompress(summed_tensor_compressed, ctx)
+    return HorovodAllreduce.apply(tensor, average, name)
 
 
 def allreduce_async_(tensor, average=True, name=None):

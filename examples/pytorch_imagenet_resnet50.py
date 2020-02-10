@@ -8,10 +8,65 @@ import torch.optim as optim
 import torch.utils.data.distributed
 from torchvision import datasets, transforms, models
 import horovod.torch as hvd
-import tensorboardX
+import wandb
 import os
 import math
-from tqdm import tqdm
+
+
+def get_compressor(args):
+    tags = [args.compression_method]
+    if args.memory:
+        tags.append('mem')
+        memory = hvd.compression.ResidualMemory()
+    else:
+        memory = hvd.compression.NoneMemory()
+    tags.append(args.communication_method)
+
+    if args.compression_method == 'none':
+        compressor = hvd.compression.NoneCompressor()
+    elif args.compression_method == 'fp16':
+        compressor = hvd.compression.FP16Compressor(memory=memory)
+    elif args.compression_method == 'randomk':
+        tags.append(f'ratio={args.compress_ratio}')
+        compressor = hvd.compression.RandomKCompressor(compress_ratio=args.compress_ratio, memory=memory)
+    elif args.compression_method == 'topk':
+        tags.append(f'ratio={args.compress_ratio}')
+        compressor = hvd.compression.TopKCompressor(compress_ratio=args.compress_ratio, memory=memory)
+    elif args.compression_method == 'threshold':
+        tags.append(f'threshold={args.threshold}')
+        compressor = hvd.compression.ThresholdCompressor(threshold_val=args.threshold, memory=memory)
+    elif args.compression_method == 'signsgd':
+        compressor = hvd.compression.SignSGDCompressor(memory=memory)
+    elif args.compression_method == 'efsignsgd':
+        tags.append(f'lr={args.efsgdlr}')
+        compressor = hvd.compression.EFSignSGDCompressor(lr=args.efsgdlr)
+    elif args.compression_method == 'signum':
+        tags.append(f'momentum={args.momentum}')
+        compressor = hvd.compression.SignumCompressor(momentum=args.momentum, memory=memory)
+    elif args.compression_method == 'qsgd':
+        tags.append(f'quantum={args.quantum}')
+        compressor = hvd.compression.QSGDCompressor(quantum_num=args.quantum, memory=memory)
+    elif args.compression_method == 'onebit':
+        compressor = hvd.compression.OneBitCompressor(memory=memory)
+    elif args.compression_method == 'terngrad':
+        compressor = hvd.compression.TernGradCompressor(memory=memory)
+    elif args.compression_method == 'dgc':
+        tags.append(f'ratio={args.compress_ratio}')
+        tags.append(f'momentum={args.momentum}')
+        tags.append(f'clipping={args.clipping}')
+        compressor = hvd.compression.DgcCompressor(compress_ratio=args.compress_ratio, momentum=args.momentum,
+                                                   gradient_clipping=args.clipping)
+    elif args.compression_method == 'powersgd':
+        compressor = hvd.compression.PowerSGDCompressor(use_memory=args.memory)
+    else:
+        # 'adaq'
+        # 'adas'
+        # 'u8bit'
+        # 'natural'
+        # 'sketch'
+        raise NotImplemented('compression not selected')
+    return compressor, tags
+
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Example',
@@ -24,8 +79,16 @@ parser.add_argument('--log-dir', default='./logs',
                     help='tensorboard log directory')
 parser.add_argument('--checkpoint-format', default='./checkpoint-{epoch}.pth.tar',
                     help='checkpoint file format')
-parser.add_argument('--fp16-allreduce', action='store_true', default=False,
-                    help='use fp16 compression during allreduce')
+
+parser.add_argument('--communication-method', default='allreduce', choices=('allreduce', 'allgather', 'broadcast'))
+parser.add_argument('--compression_method', default='none')
+parser.add_argument('--threshold', type=int, default=256)
+parser.add_argument('--quantum', type=int, default=256)
+parser.add_argument('--efsgdlr', type=float, default=0.1)
+parser.add_argument('--compress-ratio', type=float, default=0.01)
+parser.add_argument('--clipping', action='store_true', default=False)
+parser.add_argument('--memory', action='store_true', default=False)
+
 parser.add_argument('--batches-per-allreduce', type=int, default=1,
                     help='number of batches processed locally before '
                          'executing allreduce across workers; it multiplies '
@@ -79,13 +142,6 @@ for try_epoch in range(args.epochs, 0, -1):
 resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
                                   name='resume_from_epoch').item()
 
-# Horovod: print logs on the first worker.
-verbose = 1 if hvd.rank() == 0 else 0
-
-# Horovod: write TensorBoard logs on first worker.
-log_writer = tensorboardX.SummaryWriter(args.log_dir) if hvd.rank() == 0 else None
-
-
 # Horovod: limit # of CPU threads to be used per worker.
 torch.set_num_threads(4)
 
@@ -121,7 +177,6 @@ val_sampler = torch.utils.data.distributed.DistributedSampler(
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.val_batch_size,
                                          sampler=val_sampler, **kwargs)
 
-
 # Set up standard ResNet-50 model.
 model = models.resnet50()
 
@@ -137,13 +192,20 @@ optimizer = optim.SGD(model.parameters(),
                       momentum=args.momentum, weight_decay=args.wd)
 
 # Horovod: (optional) compression algorithm.
-compression = hvd.Compression.fp16 if args.fp16_allreduce else hvd.Compression.none
+compressor, tags = get_compressor(args)
 
 # Horovod: wrap optimizer with DistributedOptimizer.
 optimizer = hvd.DistributedOptimizer(
     optimizer, named_parameters=model.named_parameters(),
-    compression=compression,
+    compressor=compressor,
+    communication=args.communication_method,
     backward_passes_per_step=args.batches_per_allreduce)
+
+if hvd.rank() == 0:
+    wandb.init(project="pytorch-imagenet", id='_'.join(tags), tags=tags)
+    print(tags)
+    wandb.config.update(args)
+    wandb.watch(model)
 
 # Restore from a previous checkpoint, if initial_epoch is specified.
 # Horovod: restore on the first worker which will broadcast weights to other workers.
@@ -157,41 +219,32 @@ if resume_from_epoch > 0 and hvd.rank() == 0:
 hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
+
 def train(epoch):
     model.train()
     train_sampler.set_epoch(epoch)
     train_loss = Metric('train_loss')
     train_accuracy = Metric('train_accuracy')
 
-    with tqdm(total=len(train_loader),
-              desc='Train Epoch     #{}'.format(epoch + 1),
-              disable=not verbose) as t:
-        for batch_idx, (data, target) in enumerate(train_loader):
-            adjust_learning_rate(epoch, batch_idx)
+    for batch_idx, (data, target) in enumerate(train_loader):
+        adjust_learning_rate(epoch, batch_idx)
 
-            if args.cuda:
-                data, target = data.cuda(), target.cuda()
-            optimizer.zero_grad()
-            # Split data into sub-batches of size batch_size
-            for i in range(0, len(data), args.batch_size):
-                data_batch = data[i:i + args.batch_size]
-                target_batch = target[i:i + args.batch_size]
-                output = model(data_batch)
-                train_accuracy.update(accuracy(output, target_batch))
-                loss = F.cross_entropy(output, target_batch)
-                train_loss.update(loss)
-                # Average gradients among sub-batches
-                loss.div_(math.ceil(float(len(data)) / args.batch_size))
-                loss.backward()
-            # Gradient is applied across all ranks
-            optimizer.step()
-            t.set_postfix({'loss': train_loss.avg.item(),
-                           'accuracy': 100. * train_accuracy.avg.item()})
-            t.update(1)
-
-    if log_writer:
-        log_writer.add_scalar('train/loss', train_loss.avg, epoch)
-        log_writer.add_scalar('train/accuracy', train_accuracy.avg, epoch)
+        if args.cuda:
+            data, target = data.cuda(), target.cuda()
+        optimizer.zero_grad()
+        # Split data into sub-batches of size batch_size
+        for i in range(0, len(data), args.batch_size):
+            data_batch = data[i:i + args.batch_size]
+            target_batch = target[i:i + args.batch_size]
+            output = model(data_batch)
+            train_accuracy.update(accuracy(output, target_batch))
+            loss = F.cross_entropy(output, target_batch)
+            train_loss.update(loss)
+            # Average gradients among sub-batches
+            loss.div_(math.ceil(float(len(data)) / args.batch_size))
+            loss.backward()
+        # Gradient is applied across all ranks
+        optimizer.step()
 
 
 def validate(epoch):
@@ -199,24 +252,19 @@ def validate(epoch):
     val_loss = Metric('val_loss')
     val_accuracy = Metric('val_accuracy')
 
-    with tqdm(total=len(val_loader),
-              desc='Validate Epoch  #{}'.format(epoch + 1),
-              disable=not verbose) as t:
-        with torch.no_grad():
-            for data, target in val_loader:
-                if args.cuda:
-                    data, target = data.cuda(), target.cuda()
-                output = model(data)
+    with torch.no_grad():
+        for data, target in val_loader:
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            output = model(data)
 
-                val_loss.update(F.cross_entropy(output, target))
-                val_accuracy.update(accuracy(output, target))
-                t.set_postfix({'loss': val_loss.avg.item(),
-                               'accuracy': 100. * val_accuracy.avg.item()})
-                t.update(1)
+            val_loss.update(F.cross_entropy(output, target))
+            val_accuracy.update(accuracy(output, target))
 
-    if log_writer:
-        log_writer.add_scalar('val/loss', val_loss.avg, epoch)
-        log_writer.add_scalar('val/accuracy', val_accuracy.avg, epoch)
+    if hvd.rank() == 0:
+        wandb.log({
+            "test-accuracy": val_accuracy.avg,
+            "test-loss": val_loss.avg})
 
 
 # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
