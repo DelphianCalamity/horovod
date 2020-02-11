@@ -6,7 +6,9 @@
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
+#include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 #include "../../third_party/bloomfilter/inc/MurmurHash.hpp"
+
 #include <string>
 
 using namespace tensorflow;
@@ -52,7 +54,7 @@ namespace std {
 //            h.Update(s.a);
 //            return h.Digest();
         uint32_t out;
-        MurmurHash3_x86_32((uint32_t*) &o.a, sizeof(o.a), o.b, (uint32_t*) &out);
+        bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
         return out;
         }
     };

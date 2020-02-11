@@ -48,16 +48,16 @@ REGISTER_OP("BloomCompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
 //            bloom::FnvHash32 h;
 //            h.Update(s.b);      // casting uint8_t to int
 //            h.Update(s.a);
 //            return h.Digest();
-        uint32_t out;
-        MurmurHash3_x86_32((uint32_t*) &o.a, sizeof(o.a), o.b, (uint32_t*) &out);
-        return out;
-        }
-    };
+    uint32_t out;
+    bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
+    return out;
+}
+};
 }
 
 
@@ -71,6 +71,16 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
+    }
+
+
+    int find(const Tensor& indices, int x) {
+        auto indices_flat = indices.flat<int>();
+        for (int i=0; i<indices_flat.size(); ++i) {   // Dummy lookup
+            if (indices_flat(i) == x)
+                return 1;
+        }
+        return 0;
     }
 
     void Compute(OpKernelContext *context) override {
@@ -107,13 +117,21 @@ public:
         }
 
         // *********************** For Debugging ********************** //
+
         const Tensor &step_tensor = context->input(3);
         auto step = step_tensor.flat<int64>();
 
         if (verbosity != 0 && step(0) % verbosity == 0 ) {
             const Tensor &initial_tensor = context->input(2);
-
             auto initial_flat = initial_tensor.flat<int>();
+
+            // Compute False Positives
+            int false_positives = 0;
+            for (int i=0; i<initial_flat.size(); ++i) {
+                if (bloom.Query(i) && !find(indices, i)) {
+                    false_positives++;
+                }
+            }
 
             std::string suffix = std::to_string(logfile_suffix);
             std::string str_step = std::to_string(step(0));
@@ -133,8 +151,28 @@ public:
             fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
             fprintf(f, "Bloom size: = %d\n", bloom_size);
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
+            fprintf(f, "FalsePositives: %d\n", false_positives);
+            fprintf(f, "Total: %d\n", initial_flat.size());
             fprintf(f, "\n\n########################################################################################\n\n");
-            fclose (f);
+            fclose(f);
+
+            std::string str1 = "logs/step_" + str_step + "/" + suffix + "/fpr_" + suffix + ".txt";
+            f = fopen(str1.c_str(),"w");
+            fprintf(f, "FalsePositives: %d\n", false_positives);
+            fprintf(f, "Total: %d\n", initial_flat.size());
+            fclose(f);
+
+            std::string str2 = "logs/step_" + str_step + "/" + suffix + "/hashes_" + suffix + ".txt";
+            f = fopen(str2.c_str(),"w");
+            for (int i=0; i<initial_flat.size(); ++i) {
+                fprintf(f, "i=%lu\n", i);
+                for (uint8_t j=0; j<hash_num; j++){
+                    fprintf(f, "%lu, ", bloom.ComputeHash(i, j));
+                }
+                fprintf(f, "\n");
+            }
+            fclose(f);
+
         }
         // *********************** For Debugging ********************** //
 

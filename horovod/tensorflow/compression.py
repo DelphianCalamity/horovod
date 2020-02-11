@@ -202,6 +202,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
             h = (m / k) * math.log(2)
             params['k'] = int(math.ceil(h))
 
+            # params['k'] = 1
+
         else:
             exit(1)
 
@@ -215,8 +217,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
         params["bloom_config"].add_data(k, params['m'], params['k'], params["fpr"])
 
         # wandb.log({"M": params['m']}, gradient=params['logfile_suffix'])
-        wandb.log({"Bloom_Size": params['m']},  gradient=params['logfile_suffix'])
-        wandb.log({"#Hash_Functions": params['k']}, gradient=params['logfile_suffix'])
+        wandb.log({"Bloom_Size": params['m']},  step=params['logfile_suffix'])
+        wandb.log({"#Hash_Functions": params['k']}, step=params['logfile_suffix'])
         # wandb.log({"K": params['k']})
 
 
