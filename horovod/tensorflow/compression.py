@@ -215,9 +215,9 @@ class Bloom_Filter_TopKCompressor(Compressor):
         params["bloom_config"].add_data(k, params['m'], params['k'], params["fpr"])
 
         # wandb.log({"M": params['m']}, gradient=params['logfile_suffix'])
-        # wandb.log({"Bloom Size": wandb.Histogram(params['m'])},  gradient=params['logfile_suffix'])
+        wandb.log({"Bloom_Size": params['m']},  gradient=params['logfile_suffix'])
+        wandb.log({"#Hash_Functions": params['k']}, gradient=params['logfile_suffix'])
         # wandb.log({"K": params['k']})
-        # wandb.log({"# Hash Functions": wandb.Histogram(params['k'])}, gradient=params['logfile_suffix'])
 
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
