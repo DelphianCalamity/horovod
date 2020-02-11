@@ -209,7 +209,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
 
         # Log m and k
         f = open("log_bloom_parameters", "a")
-        f.write("M: " + str(params['m']) + " K: " + str(params['k']))
+        f.write("M: " + str(params['m']) + " K: " + str(params['k']) + " TopK: " + str(k) + "\n")
         f.close()
 
         params["bloom_config"].add_data(k, params['m'], params['k'])
