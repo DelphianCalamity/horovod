@@ -7,6 +7,8 @@
 #include "tensorflow/core/framework/tensor_types.h"
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
 #include "../../third_party/bloomfilter/inc/FnvHash.hpp"
+#include "../../third_party/bloomfilter/inc/MurmurHash.hpp"
+
 #include <string>
 #include <cstdlib>
 
@@ -47,13 +49,17 @@ namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
         size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-            bloom::FnvHash32 h;
-            h.Update(s.b);      // casting uint8_t to int
-            h.Update(s.a);
-            return h.Digest();
+//            bloom::FnvHash32 h;
+//            h.Update(s.b);      // casting uint8_t to int
+//            h.Update(s.a);
+//            return h.Digest();
+        uint32_t out;
+        MurmurHash3_x86_32((uint32_t*) &o.a, sizeof(o.a), o.b, (uint32_t*) &out);
+        return out;
         }
     };
 }
+
 
 
 class BloomCompressorOp : public OpKernel {
@@ -64,7 +70,7 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
-        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));       // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
     }
 
     void Compute(OpKernelContext *context) override {
@@ -104,7 +110,7 @@ public:
         const Tensor &step_tensor = context->input(3);
         auto step = step_tensor.flat<int64>();
 
-        if (verbosity != 0 && step(0) % verbosity == 0 ) {        // Log every 100 iterations
+        if (verbosity != 0 && step(0) % verbosity == 0 ) {
             const Tensor &initial_tensor = context->input(2);
 
             auto initial_flat = initial_tensor.flat<int>();
