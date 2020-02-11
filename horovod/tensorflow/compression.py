@@ -200,7 +200,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
             m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
             params['m'] = int(math.ceil(m))
             h = (m / k) * math.log(2)
-            params['k'] = int(math.ceil(h))
+            params['k'] = int(h)
 
         else:
             exit(1)
@@ -212,7 +212,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
         f.write("M: " + str(params['m']) + " K: " + str(params['k']) + " TopK: " + str(k) + "\n")
         f.close()
 
-        params["bloom_config"].add_data(k, params['m'], params['k'])
+        params["bloom_config"].add_data(k, params['m'], params['k'], params["fpr"])
 
         # wandb.log({"M": params['m']}, gradient=params['logfile_suffix'])
         # wandb.log({"Bloom Size": wandb.Histogram(params['m'])},  gradient=params['logfile_suffix'])
