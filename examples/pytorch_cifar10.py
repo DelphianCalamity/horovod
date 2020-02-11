@@ -6,10 +6,10 @@ import torch.optim as optim
 from torchvision import datasets, transforms, models
 import torch.utils.data.distributed
 import horovod.torch as hvd
+import os
+import wandb
 
 hvd.init()
-if hvd.rank() == 0:
-    import wandb
 
 
 def get_compressor(args):
@@ -220,16 +220,19 @@ def main():
     compressor, tags = get_compressor(args)
     name = '_'.join(tags)
 
-    if hvd.rank() == 0:
-        wandb.init(project="cifar10-pytorch", id=name, tags=tags)
-        wandb.config.update(args)
-        wandb.watch(model)
+    if hvd.rank()!=0:
+        os.environ['WANDB_MODE'] = 'dryrun'
+    wandb_id = os.environ.get('WANDB_ID', None)
+    if wandb_id is None:
+        wandb.init(config=args)
+    else:
+        wandb.init(config=args, id=f"{wandb_id}{hvd.rank()}")
+    wandb.config.update({'SLURM_JOB_ID': os.environ.get('SLURM_JOB_ID', None)})
+    # wandb.watch(model)
 
     # Horovod: wrap optimizer with DistributedOptimizer.
     optimizer = hvd.DistributedOptimizer(optimizer,
-                                         named_parameters=model.named_parameters(),
-                                         compressor=compressor,
-                                         communication=args.communication_method)
+                                         named_parameters=model.named_parameters())
 
 
     for epoch in range(1, args.epochs + 1):
