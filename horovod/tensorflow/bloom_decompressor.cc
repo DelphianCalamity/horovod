@@ -18,6 +18,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
 .Attr("logfile_suffix: int")            // For debugging
+.Attr("logs_path_suffix: int")          // For debugging
 .Attr("suffix: int")                    // For debugging
 .Attr("verbosity: int")                 // For debugging
 .Input("compressed_tensor: T")
@@ -79,6 +80,7 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));                       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
     }
@@ -134,8 +136,9 @@ public:
         auto step = step_tensor.flat<int64>();
         if (verbosity != 0 && step(0) % verbosity == 0 ) {
             std::string str_suffix = std::to_string(logfile_suffix);
+            std::string logs_suffix = std::to_string(logs_path_suffix);
             std::string str_step = std::to_string(step(0));
-            std::string str = "logs/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             if (f==NULL) {
                 perror ("Can't open file");
@@ -158,9 +161,10 @@ public:
 private:
     int hash_num;
     int bloom_size;
-    int logfile_suffix; // For debugging
-    int suffix;         // For debugging
-    int verbosity;      // For debugging
+    int logfile_suffix;     // For debugging
+    int logs_path_suffix;   // For debugging
+    int suffix;             // For debugging
+    int verbosity;          // For debugging
 };
 
 

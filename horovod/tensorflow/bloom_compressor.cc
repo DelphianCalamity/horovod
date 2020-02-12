@@ -18,7 +18,8 @@ REGISTER_OP("BloomCompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
-.Attr("logfile_suffix: int")
+.Attr("logfile_suffix: int")       // For debugging
+.Attr("logs_path_suffix: int")     // For debugging
 .Attr("verbosity: int")            // For debugging
 .Input("values: T")
 .Input("indices: int32")
@@ -70,6 +71,7 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
     }
 
@@ -134,9 +136,10 @@ public:
             }
 
             std::string suffix = std::to_string(logfile_suffix);
+            std::string logs_suffix = std::to_string(logs_path_suffix);
             std::string str_step = std::to_string(step(0));
 
-            std::string cmd = "mkdir -p logs/step_" + str_step + "/" + suffix + "/";
+            std::string cmd = "mkdir -p logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/";
             int systemRet = system(cmd.c_str());
             if(systemRet == -1){
                 perror("mkdir failed");
@@ -181,6 +184,7 @@ private:
     int hash_num;
     int bloom_size;
     int logfile_suffix;     // For debugging
+    int logs_path_suffix;     // For debugging
     int verbosity;          // For debugging
 };
 

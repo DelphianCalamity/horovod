@@ -183,8 +183,6 @@ class Bloom_Filter_TopKCompressor(Compressor):
         k = max(1, int(elemnum * compress_ratio))
 
         # Bloom filter size and number of hashes
-        # https://gist.github.com/brandt/8f9ab3ceae37562a2841
-
         # Default values
         params['m'] = 100000
         params['k'] = 3
@@ -222,6 +220,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
                                              hash_num=params['k'],
                                              bloom_size=params['m'],
                                              logfile_suffix=params['logfile_suffix'],
+                                             logs_path_suffix=params['logs_path'],
                                              verbosity=params['verbosity'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
@@ -243,6 +242,7 @@ class Bloom_Filter_TopKCompressor(Compressor):
                                                  hash_num=params['k'],
                                                  bloom_size=params['m'],
                                                  logfile_suffix=params['logfile_suffix'],
+                                                 logs_path_suffix=params['logs_path'],
                                                  suffix=params['suffix'],
                                                  verbosity=params['verbosity'])
 
