@@ -185,42 +185,25 @@ class Bloom_Filter_TopKCompressor(Compressor):
         # Bloom filter size and number of hashes
         # https://gist.github.com/brandt/8f9ab3ceae37562a2841
 
+        # Default values
+        params['m'] = 100000
+        params['k'] = 3
+
         # Configure bloom filter's m, k values
         if params["bloom_size"] is not None:
-            # Given M compute K
-            # todo
-            pass
-        elif params["hash_functions"] is not None:
-            # Given K compute M
-            #todo
-            pass
-
-        elif params["fpr"] is not None:
+            params['m'] = params['bloom_size']
+        if params["hash_functions"] is not None:
+            params['k'] = params['hash_functions']
+        if params["fpr"] is not None:
             # Given FPR compute M and K
             m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
             params['m'] = int(math.ceil(m))
             h = (m / k) * math.log(2)
             params['k'] = int(math.ceil(h))
 
-            # params['k'] = 1
-
-        else:
-            exit(1)
-
         assert params['k'] < 256, "Number of hash functions too big"
 
-        # Log m and k
-        f = open("log_bloom_parameters", "a")
-        f.write("M: " + str(params['m']) + " K: " + str(params['k']) + " TopK: " + str(k) + "\n")
-        f.close()
-
         params["bloom_config"].add_data(k, params['m'], params['k'], params["fpr"])
-
-        # wandb.log({"M": params['m']}, gradient=params['logfile_suffix'])
-        wandb.log({"Bloom_Size": params['m']},  step=params['logfile_suffix'])
-        wandb.log({"#Hash_Functions": params['k']}, step=params['logfile_suffix'])
-        # wandb.log({"K": params['k']})
-
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
