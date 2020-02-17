@@ -157,17 +157,17 @@ class RandomKCompressor(Compressor):
         k = max(1, int(numel * self.compress_ratio))
 
         indices = torch.randperm(numel, device=tensor.device)[:k]
-        tensor_sparsed = tensor[indices]
+        values = tensor[indices]
 
         ctx = indices, numel, shape
-        return [tensor_sparsed], ctx
+        return [values], ctx
 
     def decompress(self, tensors, ctx):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
         indices, numel, shape = ctx
-        tensor, = tensors
-        tensor_decompressed = torch.zeros(numel, dtype=tensor.dtype, layout=tensor.layout, device=tensor.device)
-        tensor_decompressed.scatter_(0, indices, tensor)
+        values, = tensors
+        tensor_decompressed = torch.zeros(numel, dtype=values.dtype, layout=values.layout, device=values.device)
+        tensor_decompressed.scatter_(0, indices, values)
         return tensor_decompressed.view(shape)
 
 
@@ -184,16 +184,16 @@ class TopKCompressor(Compressor):
 
         k = max(1, int(numel * self.compress_ratio))
         _, indices = torch.topk(tensor.abs(), k)
-        tensor_sparsed = tensor[indices]
-        ctx = indices, numel, shape
-        return [tensor_sparsed], ctx
+        values = tensor[indices]
+        ctx = numel, shape
+        return [values, indices], ctx
 
     def decompress(self, tensors, ctx):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
-        indices, numel, shape = ctx
-        tensor, = tensors
-        tensor_decompressed = torch.zeros(numel, dtype=tensor.dtype, layout=tensor.layout, device=tensor.device)
-        tensor_decompressed.scatter_(0, indices, tensor)
+        numel, shape = ctx
+        values, indices = tensors
+        tensor_decompressed = torch.zeros(numel, dtype=values.dtype, layout=values.layout, device=values.device)
+        tensor_decompressed.scatter_(0, indices, values)
         return tensor_decompressed.view(shape)
 
 

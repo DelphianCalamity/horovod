@@ -76,48 +76,39 @@ class Allgather(Communicator):
         self.compressor = compressor
 
     def async_send(self, tensors_compressed, name):
+        """
+        :param tensors_compressed: list of flat tensors to communicate
+        :param name: for the all_gather operation
+        :return: handles to synchronize, tensor sizes per rank
+        """
+        tensors_size = [t.numel() for t in tensors_compressed]  # list of tensor size for this rank
+        if self.compressor.tensors_size_are_same:
+            tensors_size_ag = [tensors_size] * self.horovod_size  # list of tensor sizes per rank
+            tensor_sizes = zip(*tensors_size_ag)  # transpose
+        else:
+            tensors_size = torch.tensor(tensors_size)  # TODO: set device
+            gathered = allgather(tensors_size)  # tensor of tensor sizes per rank
+            tensor_sizes = gathered.view([self.horovod_size, -1]).t().tolist()  # transpose, to list
+
         handles = []
-        tensors_size = []
-        tensors_shape = []
-        for i, tensor_compressed in enumerate(tensors_compressed):
-            tensors_size.append(torch.tensor([tensor_compressed.numel()]))
-            shape = tensor_compressed.size()
-            flattened = tensor_compressed.flatten()
-            handle = allgather_async(flattened, name + str(i))
-            tensors_shape.append(shape)
+        for tensor_compressed in tensors_compressed:
+            handle = allgather_async(tensor_compressed)
             handles.append(handle)
-        return handles, tensors_size, tensors_shape
+
+        return handles, tensor_sizes
 
     def wait_receive(self, result, ctx):
-        handles, tensors_size, tensors_shape = result
+        handles, tensor_sizes = result
         tensors_ag = []
-        for handle in handles:
+        for handle, sizes in zip(handles, tensor_sizes):
             gathered = synchronize(handle)
-            tensors_ag.append(gathered)
-        tensors_size = torch.cat(tensors_size, 0)
+            tensors_ag.append(gathered.split(sizes))
 
-        if self.compressor.tensors_size_are_same:
-            tensors_size_list = [tensors_size] * size()
-            tensors_size_ag = torch.cat(tensors_size_list, 0)
-        else:
-            tensors_size_ag = allgather(tensors_size)
-
-        from collections import defaultdict
-        index_a = defaultdict(int)
-        new_tensors = defaultdict(list)
-        num = len(handles)
-        for ranki in range(size()):
-            tensors_size = tensors_size_ag[num * ranki:num * (ranki + 1)]
-            for i in range(num):
-                index_b = index_a[i] + tensors_size[i]
-                new_tensors[ranki].append(tensors_ag[i][index_a[i]:index_b].view(tensors_shape[i]))
-                index_a[i] = index_b
-
-        list_tensor_compressed = new_tensors
         list_tensor_decompressed = []
-        for tensor_compressed in list_tensor_compressed.values():
+        for tensor_compressed in zip(*tensors_ag):
             tensor_decompressed = self.compressor.decompress(tensor_compressed, ctx)
             list_tensor_decompressed.append(tensor_decompressed)
+
         tensors_aggregated = self.compressor.aggregate(list_tensor_decompressed)
         return (tensors_aggregated / self.horovod_size) if self.compressor.average else tensors_aggregated
 
