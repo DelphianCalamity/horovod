@@ -8,63 +8,10 @@ import torch.utils.data.distributed
 import horovod.torch as hvd
 import os
 import wandb
+import time
 
 hvd.init()
-
-
-def get_compressor(args):
-    tags = [args.compression_method]
-    if args.memory:
-        tags.append('mem')
-        memory = hvd.compression.ResidualMemory()
-    else:
-        memory = hvd.compression.NoneMemory()
-    tags.append(args.communication_method)
-
-    if args.compression_method == 'none':
-        compressor = hvd.compression.NoneCompressor()
-    elif args.compression_method == 'fp16':
-        compressor = hvd.compression.FP16Compressor(memory=memory)
-    elif args.compression_method == 'randomk':
-        tags.append(f'ratio={args.compress_ratio}')
-        compressor = hvd.compression.RandomKCompressor(compress_ratio=args.compress_ratio, memory=memory)
-    elif args.compression_method == 'topk':
-        tags.append(f'ratio={args.compress_ratio}')
-        compressor = hvd.compression.TopKCompressor(compress_ratio=args.compress_ratio, memory=memory)
-    elif args.compression_method == 'threshold':
-        tags.append(f'threshold={args.threshold}')
-        compressor = hvd.compression.ThresholdCompressor(threshold_val=args.threshold, memory=memory)
-    elif args.compression_method == 'signsgd':
-        compressor = hvd.compression.SignSGDCompressor(memory=memory)
-    elif args.compression_method == 'efsignsgd':
-        tags.append(f'lr={args.efsgdlr}')
-        compressor = hvd.compression.EFSignSGDCompressor(lr=args.efsgdlr)
-    elif args.compression_method == 'signum':
-        tags.append(f'momentum={args.momentum}')
-        compressor = hvd.compression.SignumCompressor(momentum=args.momentum, memory=memory)
-    elif args.compression_method == 'qsgd':
-        tags.append(f'quantum={args.quantum}')
-        compressor = hvd.compression.QSGDCompressor(quantum_num=args.quantum, memory=memory)
-    elif args.compression_method == 'onebit':
-        compressor = hvd.compression.OneBitCompressor(memory=memory)
-    elif args.compression_method == 'terngrad':
-        compressor = hvd.compression.TernGradCompressor(memory=memory)
-    elif args.compression_method == 'dgc':
-        tags.append(f'ratio={args.compress_ratio}')
-        tags.append(f'momentum={args.momentum}')
-        tags.append(f'clipping={args.clipping}')
-        compressor = hvd.compression.DgcCompressor(compress_ratio=args.compress_ratio, momentum=args.momentum, gradient_clipping=args.clipping)
-    elif args.compression_method == 'powersgd':
-        compressor = hvd.compression.PowerSGDCompressor(use_memory=args.memory)
-    else:
-        # 'adaq'
-        # 'adas'
-        # 'u8bit'
-        # 'natural'
-        # 'sketch'
-        raise NotImplemented('compression not selected')
-    return compressor, tags
-
+global_step = 0
 
 def metric_average(val, name):
     tensor = torch.tensor(val)
@@ -76,25 +23,31 @@ criterion = nn.CrossEntropyLoss()
 
 
 def train(log_interval, model, device, train_loader, optimizer, epoch, train_sampler):
+    global global_step
     model.train()
     # Horovod: set epoch to sampler for shuffling.
     train_sampler.set_epoch(epoch)
     for batch_idx, (data, target) in enumerate(train_loader):
+        global_step += 1
+        start = time.time()
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
         loss = criterion(output, target)
         loss.backward()
         optimizer.step()
+        end = time.time()
         if batch_idx % log_interval == 0:
             # Horovod: use train_sampler to determine the number of examples in
             # this worker's partition.
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_sampler),
                        100. * batch_idx / len(train_loader), loss.item()))
+            wandb.log({"epoch": epoch, "loss": loss.item(), "total_throughput": hvd.size()*len(data)/(end-start)}, step=global_step)
 
 
-def test(model, device, test_loader, test_sampler):
+def test(model, device, test_loader, test_sampler, epoch):
+    global global_step
     model.eval()
     test_loss = 0.
     test_accuracy = 0.
@@ -122,9 +75,10 @@ def test(model, device, test_loader, test_sampler):
         print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
             test_loss, test_accuracy))
 
-        wandb.log({
-            "Test Accuracy": test_accuracy,
-            "Test Loss": test_loss})
+    wandb.log({
+        "Test Accuracy": test_accuracy,
+        "Test Loss": test_loss,
+        "epoch": epoch}, step=global_step)
 
 
 def main():
@@ -138,6 +92,8 @@ def main():
 
     parser.add_argument('--model', default='resnet20')
     parser.add_argument('--data_name', default='imagenet')
+    parser.add_argument("--data-dir", default="data")
+    parser.add_argument("--log-dir", default="log", help='not used, for compatibility')
 
     parser.add_argument('--optimizer', default='momentum')
     parser.add_argument('--epochs', type=int, default=400)
@@ -147,20 +103,8 @@ def main():
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--lr', type=float, default=0.001)
 
-    parser.add_argument('--communication_method', default='allreduce', choices=('allreduce', 'allgather', 'broadcast'))
-    parser.add_argument('--compression_method', default='none')
-    parser.add_argument('--threshold', type=int, default=256)
-    parser.add_argument('--quantum', type=int, default=256)
-    parser.add_argument('--efsgdlr', type=float, default=0.1)
-    parser.add_argument('--compress_ratio', type=float, default=0.01)
-    parser.add_argument('--clipping', action='store_true', default=False)
-    parser.add_argument('--memory', action='store_true', default=False)
-
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
-
-    # Horovod: initialize library.
-    # hvd.init()
 
     torch.manual_seed(args.seed)
 
@@ -179,7 +123,7 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
-    train_dataset = datasets.CIFAR10('data', train=True, download=True, transform=transform_train)
+    train_dataset = datasets.CIFAR10(args.data_dir, train=True, download=True, transform=transform_train)
     # Horovod: use DistributedSampler to partition the training data.
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
@@ -190,7 +134,7 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
-    test_dataset = datasets.CIFAR10('data', train=False, transform=transform_test)
+    test_dataset = datasets.CIFAR10(args.data_dir, train=False, transform=transform_test)
 
     # Horovod: use DistributedSampler to partition the test data.
     test_sampler = torch.utils.data.distributed.DistributedSampler(
@@ -198,27 +142,25 @@ def main():
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_batch_size,
                                               sampler=test_sampler, **kwargs)
 
-    model = ResNet20()
-    # if model == 'resnet20':
-    #     net = ResNet20()
-    # elif model == 'resnet50':
-    #     net = ResNet50()
-    # else:
-    #     raise NotImplemented('model not implemented')
+    if args.model == 'resnet20':
+        model = ResNet20()
+    elif args.model == 'resnet50':
+        model = ResNet50()
+    else:
+        raise NotImplemented('model not implemented')
 
     # Move model to GPU.
     model.to(device)
 
     # Horovod: scale learning rate by the number of GPUs.
-    optimizer = optim.SGD(model.parameters(), lr=args.lr * hvd.size(), momentum=args.momentum, weight_decay=args.weight_decay)
+    if args.optimizer=='sgd':
+        optimizer = optim.SGD(model.parameters(), lr=args.lr * hvd.size(), weight_decay=args.weight_decay)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=args.lr * hvd.size(), momentum=args.momentum, weight_decay=args.weight_decay)
 
     # Horovod: broadcast parameters & optimizer state.
     hvd.broadcast_parameters(model.state_dict(), root_rank=0)
     hvd.broadcast_optimizer_state(optimizer, root_rank=0)
-
-    # Horovod: (optional) compression algorithm.
-    compressor, tags = get_compressor(args)
-    name = '_'.join(tags)
 
     if hvd.rank()!=0:
         os.environ['WANDB_MODE'] = 'dryrun'
@@ -237,7 +179,7 @@ def main():
 
     for epoch in range(1, args.epochs + 1):
         train(args.log_interval, model, device, train_loader, optimizer, epoch, train_sampler)
-        test(model, device, test_loader, test_sampler)
+        test(model, device, test_loader, test_sampler, epoch)
 
 
 if __name__ == '__main__':
