@@ -576,13 +576,13 @@ class DgcCompressor(Compressor):
         k = max(1, int(elemnum * compress_ratio * 0.01))
         vals, indices = tf.math.top_k(tf.math.abs(sample_tensor), k)
         thr = tf.math.reduce_min(vals)
-        mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
+        mask = tf.math.greater(tf.math.abs(tensor_flatten), thr)
 
         selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
         #selected = tf.Print(selected, ['selected:', selected])
         def body(thr, mask, selected):
             thr = tf.cond(selected > 1.25 * max(1, int(elemnum * compress_ratio)), lambda: 1.25 * thr, lambda: 0.9 * thr)
-            mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
+            mask = tf.math.greater(tf.math.abs(tensor_flatten), thr)
             selected = tf.math.reduce_sum(tf.cast(mask, dtype=tf.float32))
             return thr, mask, selected
 
@@ -594,7 +594,8 @@ class DgcCompressor(Compressor):
         thr, mask, new_selected = tf.while_loop(condition, body, (thr, mask, selected), maximum_iterations=20)
 
         thr = tf.cond(new_selected < 1, lambda: 0.8 * thr, lambda: thr)
-        mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
+        # mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), thr)
+        mask = tf.math.greater(tf.math.abs(tensor_flatten), thr) # fix the dgc NCF data volume issue
 
         indices = tf.reshape(tf.where(mask), [-1])
         #indices = tf.Print(indices, ["selected:", selected, new_selected, 'size changes:', tf.size(indices), tf.size(tensor), "ratio:", compress_ratio])
