@@ -19,6 +19,8 @@ from __future__ import print_function
 
 from contextlib import contextmanager
 import warnings
+import os
+from distutils.util import strtobool
 
 from horovod.common.util import check_extension
 
@@ -29,7 +31,7 @@ except:
     check_extension('horovod.torch', 'HOROVOD_WITH_PYTORCH',
                     __file__, 'mpi_lib', '_mpi_lib')
 
-from horovod.torch.compression import Compression
+from horovod.torch import compression
 from horovod.torch.mpi_ops import allreduce, allreduce_async, allreduce_, allreduce_async_
 from horovod.torch.mpi_ops import allgather, allgather_async
 from horovod.torch.mpi_ops import broadcast, broadcast_async, broadcast_, broadcast_async_
@@ -145,10 +147,68 @@ class Broadcast(Communicator):
 
 
 class _DistributedOptimizer(torch.optim.Optimizer):
-    def __init__(self, params, named_parameters, compressor, communication,
+    def __init__(self, params, named_parameters, compressor=None, communication='allreduce',
                  backward_passes_per_step=1):
         super(self.__class__, self).__init__(params)
-        self.compressor = compressor
+
+        communication = os.environ.get('HOROVOD_COMM_METHOD', 'allreduce')
+
+        if compressor is None:
+            params = {
+                "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
+                "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
+                "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
+                "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
+                "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
+                "gradient_clipping": strtobool(os.environ.get('HOROVOD_GRADIENT_CLIPPING', "False")),
+                "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
+                "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
+                "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
+                "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
+                'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2))
+            }
+
+            if params["compress_method"] in ["none", "efsignsgd", "dgc", "powersgd"]:
+                pass
+            elif params["use_memory"]:
+                memory = compression.ResidualMemory(beta=params["beta"], gamma=params["gamma"])
+            else:
+                memory = compression.NoneMemory()
+
+            if params["compress_method"] == 'none':
+                self.compressor = compression.NoneCompressor()
+            elif params["compress_method"] == 'fp16':
+                self.compressor = compression.FP16Compressor(memory=memory)
+            elif params["compress_method"] == 'randomk':
+                self.compressor = compression.RandomKCompressor(compress_ratio=params['compress_ratio'],
+                                                                memory=memory)
+            elif params["compress_method"] == 'topk':
+                self.compressor = compression.TopKCompressor(compress_ratio=params['compress_ratio'],
+                                                             memory=memory)
+            elif params["compress_method"] == 'threshold':
+                self.compressor = compression.ThresholdCompressor(threshold_val=params['threshold_val'],
+                                                                  memory=memory)
+            elif params["compress_method"] == 'signsgd':
+                self.compressor = compression.SignSGDCompressor(memory=memory)
+            elif params["compress_method"] == 'efsignsgd':
+                self.compressor = compression.EFSignSGDCompressor(lr=params['learning_rate'])
+            elif params["compress_method"] == 'signum':
+                self.compressor = compression.SignumCompressor(momentum=params['momentum'], memory=memory)
+            elif params["compress_method"] == 'qsgd':
+                self.compressor = compression.QSGDCompressor(quantum_num=params['quantum_num'], memory=memory)
+            elif params["compress_method"] == 'onebit':
+                self.compressor = compression.OneBitCompressor(memory=memory)
+            elif params["compress_method"] == 'terngrad':
+                self.compressor = compression.TernGradCompressor(memory=memory)
+            elif params["compress_method"] == 'dgc':
+                self.compressor = compression.DgcCompressor(compress_ratio=params['compress_ratio'], 
+                                                            momentum=params['momentum'],
+                                                            gradient_clipping=params['gradient_clipping'])
+            elif params["compress_method"] == 'powersgd':
+                self.compressor = compression.PowerSGDCompressor(rank=params['compress_rank'],
+                                                                 use_memory=params['use_memory'])
+        else:
+            self.compressor = compressor
 
         if named_parameters is not None:
             named_parameters = list(named_parameters)
@@ -191,11 +251,11 @@ class _DistributedOptimizer(torch.optim.Optimizer):
         if self.horovod_size > 1:
             self._register_hooks()
             if communication == 'allreduce':
-                self.communication = Allreduce(compressor)
+                self.communication = Allreduce(self.compressor)
             elif communication == 'allgather':
-                self.communication = Allgather(compressor, self.horovod_size)
+                self.communication = Allgather(self.compressor, self.horovod_size)
             elif communication == 'broadcast':
-                self.communication = Broadcast(compressor, self.horovod_size)
+                self.communication = Broadcast(self.compressor, self.horovod_size)
             else:  # error
                 self.communication = None
 
@@ -315,7 +375,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
 
 
 def DistributedOptimizer(optimizer, named_parameters=None,
-                         compressor=Compression.none,
+                         compressor=None,
                          communication='allreduce',
                          backward_passes_per_step=1):
     """
