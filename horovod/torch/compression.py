@@ -200,7 +200,7 @@ class TopKCompressor(Compressor):
 class ThresholdCompressor(Compressor):
 
     def __init__(self, threshold_val=256, memory=NoneMemory()):
-        super().__init__(memory)
+        super().__init__(memory, tensors_size_are_same=False)
         self.threshold_val = threshold_val
 
     def compress(self, tensor, name):
@@ -451,7 +451,7 @@ class DgcMemory(Memory):
 class DgcCompressor(Compressor):
 
     def __init__(self, compress_ratio=0.3, momentum=0.9, gradient_clipping=False):
-        super().__init__(memory=DgcMemory(momentum, gradient_clipping))
+        super().__init__(memory=DgcMemory(momentum, gradient_clipping), tensors_size_are_same=False)
         self.compress_ratio = compress_ratio
 
     def compress(self, tensor, name):
