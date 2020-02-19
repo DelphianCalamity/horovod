@@ -169,7 +169,7 @@ class TopKCompressor(Compressor):
         return tensor_decompressed
 
 
-class Bloom_Filter_TopKCompressor(Compressor):
+class Bloom_Filter_Compressor(Compressor):
     """"""
 
     @staticmethod
@@ -190,8 +190,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
         # Configure bloom filter's m, k values
         if params["bloom_size"] is not None:
             params['m'] = params['bloom_size']
-        if params["hash_functions"] is not None:
-            params['k'] = params['hash_functions']
+        if params["hash_functions_number"] is not None:
+            params['k'] = params['hash_functions_number']
         if params["fpr"] is not None:
             # Given FPR compute M and K
             m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
@@ -202,6 +202,8 @@ class Bloom_Filter_TopKCompressor(Compressor):
         assert params['k'] < 256, "Number of hash functions too big"
 
         params["bloom_config"].add_data(k, params['m'], params['k'], params["fpr"])
+        initial_bits_values = 32*k
+        params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+m, (initial_bits_values+m)/8, initial_bits_values-m, (initial_bits_values-m)/8)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
@@ -1333,4 +1335,4 @@ class Compression(object):
     natural = NaturalCompressor
     sketch = SketchCompressor
     fake = FakeCompressor
-    bloom_topk = Bloom_Filter_TopKCompressor
+    bloom = Bloom_Filter_Compressor

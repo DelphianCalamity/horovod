@@ -144,7 +144,7 @@ public:
             if(systemRet == -1){
                 perror("mkdir failed");
             }
-            std::string str = "logs/step_" + str_step + "/" + suffix + "/compressor_logs_" + suffix + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/compressor_logs_" + suffix + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             if (f==NULL) {
                 perror ("Can't open file");
