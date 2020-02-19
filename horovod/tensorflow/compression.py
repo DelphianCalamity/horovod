@@ -222,7 +222,7 @@ class Bloom_Filter_Compressor(Compressor):
                                              hash_num=params['k'],
                                              bloom_size=params['m'],
                                              logfile_suffix=params['logfile_suffix'],
-                                             logs_path_suffix=params['logs_path'],
+                                             logs_path_suffix=params['logs_path_suffix'],
                                              verbosity=params['verbosity'])
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
@@ -244,7 +244,7 @@ class Bloom_Filter_Compressor(Compressor):
                                                  hash_num=params['k'],
                                                  bloom_size=params['m'],
                                                  logfile_suffix=params['logfile_suffix'],
-                                                 logs_path_suffix=params['logs_path'],
+                                                 logs_path_suffix=params['logs_path_suffix'],
                                                  suffix=params['suffix'],
                                                  verbosity=params['verbosity'])
 
