@@ -159,12 +159,12 @@ public:
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
 
-            std::string str1 = "logs/step_" + str_step + "/" + suffix + "/fpr_" + suffix + ".txt";
+            std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/fpr_" + suffix + ".txt";
             f = fopen(str1.c_str(),"w");
             fprintf(f, "FalsePositives: %d  Total: %d\n", false_positives,  initial_flat.size());
             fclose(f);
 
-            std::string str2 = "logs/step_" + str_step + "/" + suffix + "/hashes_" + suffix + ".txt";
+            std::string str2 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/hashes_" + suffix + ".txt";
             f = fopen(str2.c_str(),"w");
             for (int i=0; i<initial_flat.size(); ++i) {
                 fprintf(f, "i=%lu\n", i);
