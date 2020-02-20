@@ -25,7 +25,7 @@ REGISTER_OP("BloomCompressor")
 .Input("indices: int32")
 .Input("initial_tensor: int32")    // For debugging
 .Input("step: int64")              // For debugging
-.Output("compressed_tensor: T")
+.Output("compressed_tensor: bool")
 
 //Todo: Fix the segfault error below to enable shape inference
 // https://github.com/tensorflow/tensorflow/issues/31335
@@ -49,16 +49,16 @@ REGISTER_OP("BloomCompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
 //            bloom::FnvHash32 h;
 //            h.Update(s.b);      // casting uint8_t to int
 //            h.Update(s.a);
 //            return h.Digest();
-    uint32_t out;
-    bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
-    return out;
-}
-};
+            uint32_t out;
+            bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
+            return out;
+        }
+    };
 }
 
 
@@ -90,36 +90,37 @@ public:
         // Retrieving Inputs
         const Tensor &values = context->input(0);  auto values_flat = values.flat<int>();
         const Tensor &indices = context->input(1);  auto indices_flat = indices.flat<int>();
+        int values_size = values_flat.size();
+        int output_concat_dim = values_size + bloom_size;
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
-        for (int i = 0; i < indices_flat.size(); ++i) {
+        for (int i=0; i<indices_flat.size(); ++i) {
             bloom.Insert(indices_flat(i));
         }
-        const std::vector<bool> &bloom_vec = bloom.Get_bloom();
-        int output_concat_dim = values_flat.size() + bloom_size;
-
-        TensorShape output_shape;
-        output_shape.AddDim(output_concat_dim);
 
         // Create an output tensor
+        TensorShape output_shape;
+        output_shape.AddDim(output_concat_dim);
         Tensor *output = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output));
-        auto output_flat = output->template flat<int>();
 
-        // Todo: Important!! Copy values and bloom in a more efficient way; \
-        // use bytes datatype for output tensor and memcopy the integer values. \
-        //  https://github.com/tensorflow/tensorflow/blob/dcc414587f50673271a31ab767909ec89c956324/tensorflow/core/framework/tensor_testutil.h#L57
+        auto output_flat = output->template flat<bool>();
+        bool* out_ptr = output_flat.data();
+        const void* values_ptr = values_flat.data();
 
-        for (int i = 0; i < values_flat.size(); ++i) {
-            output_flat(i) = values_flat(i);
-        }
-        for (int i = values_flat.size(), j = 0; j < bloom_size; ++i, ++j) {
-            output_flat(i) = bloom_vec[j];
-        }
+        std::vector<bool> &bloom_vec = bloom.Get_bloom();
+        memcpy(out_ptr, values_ptr, values_size*sizeof(int));
+        std::copy(bloom_vec.begin(), bloom_vec.end(), out_ptr+values_size*sizeof(int));
+
+//        for (int i=0; i<values_flat.size(); ++i) {
+//            output_flat(i) = values_flat(i);
+//        }
+//        for (int i=values_flat.size(), j=0; j<bloom_size; ++i, ++j) {
+//            output_flat(i) = bloom_vec[j];
+//        }
 
         // *********************** For Debugging ********************** //
-
         const Tensor &step_tensor = context->input(3);
         auto step = step_tensor.flat<int64>();
 
@@ -184,7 +185,7 @@ private:
     int hash_num;
     int bloom_size;
     int logfile_suffix;     // For debugging
-    int logs_path_suffix;     // For debugging
+    int logs_path_suffix;   // For debugging
     int verbosity;          // For debugging
 };
 

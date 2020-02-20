@@ -203,7 +203,8 @@ class Bloom_Filter_Compressor(Compressor):
 
         params["bloom_config"].add_data(k, params['m'], params['k'], params["fpr"])
         initial_bits_values = 32*k
-        params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+params['m'], (initial_bits_values+params['m'])/8, initial_bits_values-params['m'], (initial_bits_values-params['m'])/8)
+        params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+params['m'],
+                                           (initial_bits_values+params['m'])/8, initial_bits_values-params['m'], (initial_bits_values-params['m'])/8)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')

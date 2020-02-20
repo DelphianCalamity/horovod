@@ -21,7 +21,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("logs_path_suffix: int")          // For debugging
 .Attr("suffix: int")                    // For debugging
 .Attr("verbosity: int")                 // For debugging
-.Input("compressed_tensor: T")
+.Input("compressed_tensor: bool")
 .Input("decompressed_size: int32")
 .Input("step: int64")                   // For debugging
 .Output("decompressed_tensor: int32")
@@ -49,16 +49,16 @@ REGISTER_OP("BloomDecompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
 //            bloom::FnvHash32 h;
 //            h.Update(s.b);      // casting uint8_t to int
 //            h.Update(s.a);
 //            return h.Digest();
-        uint32_t out;
-        bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
-        return out;
-        }
-    };
+    uint32_t out;
+    bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
+    return out;
+}
+};
 }
 
 
@@ -146,7 +146,7 @@ public:
             fprintf(f, "compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
             fprintf(f, "decompressed size: %d\n\n", decompressed_size);
             fprintf(f, "Bloom size: = %d\n", bloom_size);
-             fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
+            fprintf(f, "Bloom Filter:"); print_vector(bloom_vec, bloom_size, f);
             fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
             fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
             fprintf(f, "########################################################################################\n\n");
