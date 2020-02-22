@@ -1195,34 +1195,43 @@ class FakeCompressor(Compressor):
             params['tensors_size_are_same'] = True
 
         elif params['compress_method'] in ['threshold']:
-            tensor_double = tf.concat([tensor_flatten, tensor_flatten], 0)
+            #tensor_double = tf.concat([tensor_flatten, tensor_flatten], 0)
 
-            if params['data_name'] == 'cifar10':
-                if params["threshold_val"] == 0.01:
-                    tensor_compressed = tensor_double[:max(1, int(0.002801085 * elemnum))]
-                elif params["threshold_val"] == 0.001:
-                    tensor_compressed = tensor_double[:max(1, int(0.191417873 * elemnum))]
-                elif params["threshold_val"] == 0.0001:
-                    tensor_compressed = tensor_double[:max(1, int(1.593330538 * elemnum))]
-                elif params["threshold_val"] == 0.00001:
-                    tensor_compressed = tensor_double[:max(1, int(1.95826873 * elemnum))]
+            if params['model_name'] == 'resnet20_v2':
+                if params["threshold_val"] == 0.01 and params["use_memory"]:
+                    tensor_compressed = tensor_flatten[:max(1, int(0.004551207 * elemnum))]
 
-            elif params['data_name'] == 'imagenet':
-                if params["threshold_val"] == 0.0001:
-                    tensor_compressed = tensor_double[:max(1, int(1.78922153 * elemnum))]
-                elif params["threshold_val"] == 0.00001:
-                    tensor_compressed = tensor_double[:max(1, int(1.97886104 * elemnum))]
+            elif params['model_name'] == 'densenet40_k12':
+                if params["threshold_val"] == 0.01 and params["use_memory"]:
+                    tensor_compressed = tensor_flatten[:max(1, int(0.016955392 * elemnum))]
+
+            elif params['model_name'] == 'resnet50':
+                if params["threshold_val"] == 0.01 and params["use_memory"]:
+                    tensor_compressed = tensor_flatten[:max(1, int(0.116419225 * elemnum))]
+
+            elif params['model_name'] == 'ncf':
+                if params["threshold_val"] == 0.0001 and params["use_memory"]:
+                    tensor_compressed = tensor_flatten[:max(1, int(0.001318898 * elemnum))]
+
             params['tensors_size_are_same'] = False
 
         elif params['compress_method'] in ['powersgd']:
-            if params['data_name'] == 'cifar10':
+            if params['model_name'] == 'resnet20_v2':
                 temp1 = tensor_flatten[:max(1, int(0.691594033 * 0.5 * elemnum))]
                 temp2 = tensor_flatten[-max(1, int(0.691594033 * 0.5 * elemnum)):]
-                tensor_compressed = temp1, temp2
-            elif params['data_name'] == 'imagenet':
-                temp1 = tensor_flatten[:max(1, int(0.637016277 * 0.5 * elemnum))]
-                temp2 = tensor_flatten[-max(1, int(0.637016277 * 0.5 * elemnum)):]
-                tensor_compressed = temp1, temp2
+
+            elif params['model_name'] == 'densenet40_k12':
+                temp1 = tensor_flatten[:max(1, int(0.5 * 0.5 * elemnum))]
+                temp2 = tensor_flatten[-max(1, int(0.5 * 0.5 * elemnum)):]
+
+            elif params['model_name'] == 'resnet50':
+                temp1 = tensor_flatten[:max(1, int(0.53 * 0.5 * elemnum))]
+                temp2 = tensor_flatten[-max(1, int(0.53 * 0.5 * elemnum)):]
+            elif params['model_name'] == 'ncf':
+                temp1 = tensor_flatten[:max(1, int(0.006557669 * 0.5 * elemnum))]
+                temp2 = tensor_flatten[-max(1, int(0.006557669 * 0.5 * elemnum)):]
+
+            tensor_compressed = temp1, temp2
             params['tensors_size_are_same'] = True
 
         ctx = elemnum, tensor_shape
@@ -1249,10 +1258,9 @@ class FakeCompressor(Compressor):
             tensor_decompressed = tf.concat([temp, tf.cast(tensor_compressed[1], tf.float32)[1:]], 0)
 
         elif params['compress_method'] in ['powersgd']:
-            temp1 = tf.reshape(tensor_compressed[0][0], [-1])
-            temp2 = tf.reshape(tensor_compressed[1][0], [-1])
-            tensor_decompressed = tf.concat([temp1, temp2,
-                                             tf.ones([elemnum - 2], dtype=tf.float32)], 0)
+            temp1, temp2 = tensor_compressed
+            temp = tf.reshape((temp1+temp2)[0], [-1])
+            tensor_decompressed = tf.concat([temp, tf.ones([elemnum - 1], dtype=tf.float32)], 0)
 
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed

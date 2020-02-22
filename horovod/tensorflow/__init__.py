@@ -77,7 +77,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             "debug": strtobool(os.environ.get('HOROVOD_DEBUG', "False")),
             "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
             "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
-            'data_name': os.environ.get('HOROVOD_DATA_NAME', 'cifar10'),
+            'model_name': os.environ.get('HOROVOD_MODEL_NAME', 'resnet20_v2'),
             'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True')),
             'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
             'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2))
@@ -145,7 +145,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
     compression = params["compressor"]
     params['tensor_name'] = tensor.name
-    params['tensor_dims'] = len(tensor.get_shape().as_list())
+
 
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
@@ -153,6 +153,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     #print("========================== print params ====================================")
     #print(params)
     if isinstance(tensor, tf.IndexedSlices):
+        print("=====this model contains sparse gradient")
         with tf.device(device_sparse):
             # For IndexedSlices, do two allgathers intead of an allreduce.
             horovod_size = tf.cast(size(), tensor.values.dtype)
@@ -166,7 +167,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                                 dense_shape=tensor.dense_shape)
     else:
         with tf.device(device_dense):
-
+            print("=====this model contains dense gradient")
+            params['tensor_dims'] = len(tensor.get_shape().as_list())
             def Allreduce(tensors):
                 if tensors is None:
                     tensors = []
@@ -245,7 +247,6 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             communicate['allreduce'] = Allreduce
             communicate['allgather'] = Allgather
             communicate['broadcast'] = Broadcast
-
             tensor_compensate = compression.memory_compensate(tensor, params)
             if params['memory_debug']:
                 tensor_compensate = tf.cond(tf.train.get_global_step() < 3,
@@ -469,8 +470,8 @@ if _LegacyOptimizer is not None:
             allreduce the gradients before returning them.
             """
             gradients = self._optimizer.compute_gradients(*args, **kwargs)
-            if os.environ.get('HOROVOD_DEBUG', False):
-                print(f"==Debug== The model has {len(gradients)} gradient tensors")
+            # if os.environ.get('HOROVOD_DEBUG', False):
+            print(f"==Debug== The model has {len(gradients)} gradient tensors")
             if size() > 1:
                 grads, vars = zip(*gradients)
                 avg_grads = self._allreduce_grads(grads)
