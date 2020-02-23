@@ -49,19 +49,17 @@ REGISTER_OP("BloomCompressor")
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
-        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
+    size_t operator()(bloom::HashParams<uint32_t> const &s) const {
 //            bloom::FnvHash32 h;
 //            h.Update(s.b);      // casting uint8_t to int
 //            h.Update(s.a);
 //            return h.Digest();
-            uint32_t out;
-            bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
-            return out;
-        }
-    };
+    uint32_t out;
+    bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
+    return out;
 }
-
-
+};
+}
 
 class BloomCompressorOp : public OpKernel {
 
@@ -85,13 +83,14 @@ public:
         return 0;
     }
 
+
     void Compute(OpKernelContext *context) override {
 
         // Retrieving Inputs
         const Tensor &values = context->input(0);  auto values_flat = values.flat<int>();
         const Tensor &indices = context->input(1);  auto indices_flat = indices.flat<int>();
         int values_size = values_flat.size();
-        int output_concat_dim = values_size + bloom_size;
+        int output_concat_dim = values_size*sizeof(int) + bloom_size;
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
@@ -112,13 +111,6 @@ public:
         std::vector<bool> &bloom_vec = bloom.Get_bloom();
         memcpy(out_ptr, values_ptr, values_size*sizeof(int));
         std::copy(bloom_vec.begin(), bloom_vec.end(), out_ptr+values_size*sizeof(int));
-
-//        for (int i=0; i<values_flat.size(); ++i) {
-//            output_flat(i) = values_flat(i);
-//        }
-//        for (int i=values_flat.size(), j=0; j<bloom_size; ++i, ++j) {
-//            output_flat(i) = bloom_vec[j];
-//        }
 
         // *********************** For Debugging ********************** //
         const Tensor &step_tensor = context->input(3);
