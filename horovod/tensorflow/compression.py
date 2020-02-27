@@ -1139,6 +1139,18 @@ class FakeCompressor(Compressor):
     """Default no-op compression."""
 
     @classmethod
+    def memory_compensate(cls, tensor, params):
+        """Update the tensor with the residuals."""
+
+        return tensor
+
+    @classmethod
+    def memory_update(cls, tensor, tensor_compensate, tensor_compressed, ctx, params):
+        """Update the residuals."""
+
+        return []
+
+    @classmethod
     def compress(cls, tensor, params):
         """Returns the tensor unmodified."""
         tensor_shape = tf.shape(tensor)
@@ -1213,7 +1225,18 @@ class FakeCompressor(Compressor):
                 if params["threshold_val"] == 0.0001 and params["use_memory"]:
                     tensor_compressed = tensor_flatten[:max(1, int(0.001318898 * elemnum))]
 
-            params['tensors_size_are_same'] = False
+            elif params['model_name'] == 'ptb':
+                if params["threshold_val"] == 0.01 and params["use_memory"]:
+                    tensor_compressed = tensor_flatten[:max(1, int(0.0182253132 * elemnum))]
+
+            elif params['model_name'] == 'segmentation':
+                if params["threshold_val"] == 0.01 and params["use_memory"]:
+                    tensor_compressed = tensor_flatten[:max(1, int(0.0145350 * elemnum))]
+
+            elif params['model_name'] == 'vgg19':
+                tensor_compressed = tensor_flatten[:max(1, int(0.1 * elemnum))]
+
+            params['tensors_size_are_same'] = True
 
         elif params['compress_method'] in ['powersgd']:
             if params['model_name'] == 'resnet20_v2':
@@ -1230,6 +1253,15 @@ class FakeCompressor(Compressor):
             elif params['model_name'] == 'ncf':
                 temp1 = tensor_flatten[:max(1, int(0.006557669 * 0.5 * elemnum))]
                 temp2 = tensor_flatten[-max(1, int(0.006557669 * 0.5 * elemnum)):]
+            elif params['model_name'] == 'ptb':
+                temp1 = tensor_flatten[:max(1, int(0.003924611 * 0.5 * elemnum))]
+                temp2 = tensor_flatten[-max(1, int(0.003924611 * 0.5 * elemnum)):]
+            elif params['model_name'] == 'segmentation':
+                temp1 = tensor_flatten[:max(1, int(0.69452657 * 0.5 * elemnum))]
+                temp2 = tensor_flatten[-max(1, int(0.69452657 * 0.5 * elemnum)):]
+            elif params['model_name'] == 'vgg19':
+                temp1 = tensor_flatten[:max(1, int(0.5 * 0.5 * elemnum))]
+                temp2 = tensor_flatten[-max(1, int(0.5 * 0.5 * elemnum)):]
 
             tensor_compressed = temp1, temp2
             params['tensors_size_are_same'] = True
