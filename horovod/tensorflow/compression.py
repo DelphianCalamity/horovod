@@ -195,7 +195,12 @@ class Bloom_Filter_Compressor(Compressor):
         if params["fpr"] is not None:
             # Given FPR compute M and K
             m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
-            params['m'] = int(math.ceil(m))
+            # bloom size must be a multiple of 8
+            m = int(m/8)
+            if m % 8 != 0:
+                m += 1
+            # Give bloom size in number of bytes
+            params['m'] = m
             h = (m / k) * math.log(2)
             params['k'] = int(math.ceil(h))
 
