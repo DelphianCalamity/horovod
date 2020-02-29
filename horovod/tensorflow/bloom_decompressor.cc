@@ -20,7 +20,7 @@ REGISTER_OP("BloomDecompressor")
 .Attr("logs_path_suffix: int")          // For debugging
 .Attr("suffix: int")                    // For debugging
 .Attr("verbosity: int")                 // For debugging
-.Input("compressed_tensor: bool")
+.Input("compressed_tensor: int8")
 .Input("decompressed_size: int32")
 .Input("step: int64")                   // For debugging
 .Output("decompressed_tensor: int32")
@@ -70,16 +70,6 @@ void print_vector(int* vec, int size, FILE* f) {
     fprintf(f, "%d]\n\n", (int) vec[i]);
 }
 
-void print_vector(const bool* vec, int size, FILE* f) {
-    fprintf(f, "\n[");
-    int i=0;
-    for (i = 0; i < size-1; i++) {
-        fprintf(f, "%d, ", (int) vec[i]);
-    }
-    fprintf(f, "%d]\n\n", (int) vec[i]);
-}
-
-
 class BloomDecompressorOp : public OpKernel {
 
 public:
@@ -99,14 +89,14 @@ public:
         const Tensor &compressed_tensor = context->input(0);
         const Tensor &decompressed_size_tensor = context->input(1);
 
-        auto compressed_tensor_flat = compressed_tensor.flat<bool>();
+        auto compressed_tensor_flat = compressed_tensor.flat<int8>();
         auto decompressed_size_flat = decompressed_size_tensor.flat<int>();
 
         int values_size = (compressed_tensor_flat.size()-bloom_size)/sizeof(int);
         int decompressed_size = *decompressed_size_flat.data();
 
         // Reconstruct the bloom filter
-        const bool *ptr = compressed_tensor_flat.data();           // Note: Bool is 1 byte
+        const int8 *ptr = compressed_tensor_flat.data();           // Note: int8 is 1 byte
         int values_bytes = values_size*sizeof(int);
         int *values_vec = (int*) malloc(values_bytes);
         memcpy(values_vec, ptr, values_bytes);
@@ -135,7 +125,6 @@ public:
         }
 
         // *********************** For Debugging ********************** //
-
         const Tensor &step_tensor = context->input(2);
         auto step = step_tensor.flat<int64>();
         if (verbosity != 0 && step(0) % verbosity == 0 ) {
@@ -146,10 +135,9 @@ public:
             FILE* f = fopen(str.c_str(),"w");
             if (f==NULL)
                 perror ("Can't open file");
-//            fprintf(f, "compressed_tensor: %s\n", compressed_tensor.DebugString(compressed_tensor_flat.size()).c_str());
             fprintf(f, "decompressed size: %d\n\n", decompressed_size);
             fprintf(f, "Bloom size: = %d\n", bloom_size);
-            fprintf(f, "Bloom Filter:"); print_vector(ptr, bloom_size, f);
+            bloom_filter.fprint(f);
             fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
             fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
             fprintf(f, "########################################################################################\n\n");

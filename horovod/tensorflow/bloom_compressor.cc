@@ -25,7 +25,7 @@ REGISTER_OP("BloomCompressor")
 .Input("indices: int32")
 .Input("initial_tensor: int32")    // For debugging
 .Input("step: int64")              // For debugging
-.Output("compressed_tensor: bool")
+.Output("compressed_tensor: int8")
 
 //Todo: Fix the segfault error below to enable shape inference
 // https://github.com/tensorflow/tensorflow/issues/31335
@@ -104,11 +104,11 @@ public:
         Tensor *output = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output));
 
-        auto output_flat = output->template flat<bool>();
-        bool* out_ptr = output_flat.data();
+        auto output_flat = output->template flat<int8>();
+        int8* out_ptr = output_flat.data();
         const void* values_ptr = values_flat.data();
 
-        std::vector<bool> &bloom_vec = bloom.Get_bloom();
+        std::vector<unsigned char> &bloom_vec = bloom.Get_bloom();
         memcpy(out_ptr, values_ptr, values_size*sizeof(int));
         std::copy(bloom_vec.begin(), bloom_vec.end(), out_ptr+values_size*sizeof(int));
 
@@ -146,6 +146,7 @@ public:
             fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
             fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
             fprintf(f, "Bloom size: = %d\n", bloom_size);
+            bloom.fprint(f);
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
             fprintf(f, "FalsePositives: %d\n", false_positives);
             fprintf(f, "Total: %d\n", initial_flat.size());
