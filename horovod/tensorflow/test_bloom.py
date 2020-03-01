@@ -17,8 +17,9 @@ values = tf.bitcast(values, tf.int32)
 bloom_compressor = tf.load_op_library('./bloom_compressor_op.so').bloom_compressor
 bloom_decompressor = tf.load_op_library('./bloom_decompressor_op.so').bloom_decompressor
 
-hash_num = 2
-bloom_size = 10
+hash_num = 1
+# bloom size is given in bytes, so for a bloom of 8 bits set bloom_size to 1
+bloom_size = 1
 decompressed_size = 5
 
 step=tf.placeholder(tf.int32, name='step')
@@ -31,20 +32,20 @@ compressed_tensor = bloom_compressor(values, indices,
 									 logs_path_suffix=1,
 									 verbosity=1)
 
-# decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size,
-# 										 1,
-# 										 hash_num=hash_num,
-# 										 bloom_size=bloom_size,
-# 										 logfile_suffix=1,
-# 										 logs_path_suffix=1,
-# 										 suffix=1,
-# 										 verbosity=1)
+decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size,
+										 1,
+										 hash_num=hash_num,
+										 bloom_size=bloom_size,
+										 logfile_suffix=1,
+										 logs_path_suffix=1,
+										 suffix=1,
+										 verbosity=1)
 
 with tf.Session() as sess:
 	print("Initial Tensor: ", sess.run(init_tensor))
 	print("Values: ", sess.run(values))
 	print("Indices: ", sess.run(indices))
 
-	print("Compressed Tensor: ", sess.run(compressed_tensor, feed_dict={step:0}))
-	print("Compressed Tensor Shape: ", compressed_tensor.get_shape())
-	# print("Decompressed Tensor", sess.run(decompressed_tensor, feed_dict={step:0}))
+	# sess.run(compressed_tensor, feed_dict={step:0})
+	# print("Compressed Tensor Shape: ", compressed_tensor.get_shape())
+	sess.run(decompressed_tensor, feed_dict={step:0})
