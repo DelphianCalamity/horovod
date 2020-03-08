@@ -416,6 +416,18 @@ def _make_allreduce_grads_fn(name, device_dense, device_sparse,
     if type(params)==str:
         params = json.loads(params)
     def allreduce_grads(grads):
+        params_size = 0
+        params_size_ls = []
+        for grad in grads:
+            params_size += tf.size(grad)
+            params_size_ls.append(tf.zeros([tf.size(grad)]).get_shape().as_list())
+
+        print('The model has ', len(grads), ' gradients')
+        print("The model has ", tf.zeros([params_size]).get_shape().as_list(), ' parameters')
+        print("=======Parameters size print BEGIN========")
+        print(params_size_ls)
+        print("=======Parameters size print END========")
+
         with tf.name_scope(name + "_Allreduce"):
             if sparse_as_dense:
                 grads = [tf.convert_to_tensor(grad)
