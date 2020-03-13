@@ -146,10 +146,27 @@ class TopKCompressor(Compressor):
         compress_ratio = params["compress_ratio"]
 
         k = max(1, int(elemnum * compress_ratio))
+        params['k'] = k
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k)
         values = tf.gather(tensor_flatten, indices)
-        values = tf.bitcast(values, tf.int32)
-        tensor_compressed = tf.concat([values, indices], 0)
+        values = tf.bitcast(values, tf.uint32)
+
+        if params['code'] is not None:
+
+            filename = resource_loader.get_path_to_datafile('bitstream_compressor_op.so')
+            library = load_library.load_op_library(filename)
+            bitstream_compressor = library.bitstream_compressor
+
+            compressed_indices = bitstream_compressor(indices,
+                                                      tf.train.get_or_create_global_step(),
+                                                      logfile_suffix=params['logfile_suffix'],
+                                                      logs_path_suffix=params['logs_path_suffix'],
+                                                      verbosity=params['verbosity'],
+                                                      code=params['code'])
+        else:
+            compressed_indices = indices
+
+        tensor_compressed = tf.concat([values, compressed_indices], 0)
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
         return tensor_compressed, ctx
@@ -157,14 +174,34 @@ class TopKCompressor(Compressor):
     @staticmethod
     def decompress(tensor_compressed, ctx, params):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
-        values, indices = tf.split(tensor_compressed, 2)
+
+        compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
+        values, indices = tf.split(tensor_compressed, [params['k'], compressed_tensor_size-params['k']])
         values = tf.bitcast(values, tf.float32)
+
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
+
+        if params['code'] is not None:
+            filename = resource_loader.get_path_to_datafile('bitstream_decompressor_op.so')
+            library = load_library.load_op_library(filename)
+            bitstream_decompressor = library.bitstream_decompressor
+
+            decompressed_indices = bitstream_decompressor(indices, params['k'],
+                                                        tf.train.get_or_create_global_step(),
+                                                        logfile_suffix=params['logfile_suffix'],
+                                                        logs_path_suffix=params['logs_path_suffix'],
+                                                        verbosity=params['verbosity'],
+                                                        code=params['code'])
+
+        else:
+            decompressed_indices = indices
+
         zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
         op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
         with tf.control_dependencies([op]):
-            tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+            tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, values)
+
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
