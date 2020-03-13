@@ -6,8 +6,8 @@
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
 
-#include "headers/codecfactory.h"
-#include "headers/deltautil.h"
+#include "../../third_party/FastPFor/headers/codecfactory.h"
+#include "../../third_party/FastPFor/headers/deltautil.h"
 
 #include <string>
 #include <cstdlib>

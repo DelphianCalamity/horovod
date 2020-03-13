@@ -46,6 +46,8 @@ torch_mpi_lib = Extension('horovod.torch.mpi_lib', [])
 torch_mpi_lib_impl = Extension('horovod.torch.mpi_lib_impl', [])
 torch_mpi_lib_v2 = Extension('horovod.torch.mpi_lib_v2', [])
 mxnet_mpi_lib = Extension('horovod.mxnet.mpi_lib', [])
+compress_lib = CMakeExtension('FastPFor', cmake_lists_dir='third_party/FastPFor',
+                          sources=[])
 gloo_lib = CMakeExtension('gloo', cmake_lists_dir='third_party/gloo',
                           sources=[])
 
@@ -701,6 +703,12 @@ def get_common_options(build_ext):
                     'horovod/common/gloo/memory_store.cc',
                     'horovod/common/ops/gloo_operations.cc']
 
+    # have_fastpfor = os.environ.get('HOROVOD_WITH_FASTPFOR')
+    # if True:
+    # MACROS += [('HAVE_FASTPFOR', '1')]
+    INCLUDES += ['third_party/FastPFor']
+
+
     if have_mlsl:
         MACROS += [('HAVE_MLSL', '1')]
         INCLUDES += [mlsl_root + '/intel64/include/']
@@ -917,6 +925,9 @@ def build_tf_extension(build_ext, global_options):
                  LDSHARED=ldshared):
             if options['BUILD_GLOO']:
                 build_cmake(build_ext, gloo_lib, 'tf', gloo_compile_macros, options, tensorflow_mpi_lib)
+
+            build_cmake(build_ext, compress_lib, 'tf', [], options, tensorflow_mpi_lib)
+
             customize_compiler(build_ext.compiler)
             build_ext.build_extension(tensorflow_mpi_lib)
     finally:
@@ -1440,7 +1451,7 @@ setup(name='horovod',
           'License :: OSI Approved :: Apache Software License'
       ],
       ext_modules=[tensorflow_mpi_lib, torch_mpi_lib, torch_mpi_lib_impl,
-                   torch_mpi_lib_v2, mxnet_mpi_lib, gloo_lib],
+                   torch_mpi_lib_v2, mxnet_mpi_lib, gloo_lib, compress_lib],
       cmdclass={'build_ext': custom_build_ext},
       # cffi is required for PyTorch
       # If cffi is specified in setup_requires, it will need libffi to be installed on the machine,
