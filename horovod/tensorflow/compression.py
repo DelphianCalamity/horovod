@@ -296,8 +296,6 @@ class Bloom_Filter_Compressor(Compressor):
         return decompressed_tensor
 
 
-
-
 class ThresholdCompressor(Compressor):
     """"""
 
