@@ -232,21 +232,21 @@ class Bloom_Filter_Compressor(Compressor):
         if params["fpr"] is not None:
             # Given FPR compute M and K
             m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
-            # bloom size must be a multiple of 8
-            m = int(m/8)
-            if m % 8 != 0:
-                m += 1
-            # Give bloom size in number of bytes
             params['m'] = m
             h = (m / k) * math.log(2)
             params['k'] = int(math.ceil(h))
 
+        # Give bloom size in number of bytes
+        # bloom size must be a multiple of 8
+        params['m'] = int(params['m']/8)
+        if params['m'] % 8 != 0:
+            params['m'] += 1
         assert params['k'] < 256, "Number of hash functions too big"
 
-        params["bloom_config"].add_data(k, params['m'], params['k'], params["fpr"])
+        params["bloom_config"].add_data(k, params['m']*8, params['k'], params["fpr"])
         initial_bits_values = 32*k
-        params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+params['m'],
-                                           (initial_bits_values+params['m'])/8, initial_bits_values-params['m'], (initial_bits_values-params['m'])/8)
+        params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+params['m']*8,
+                                           (initial_bits_values+params['m']*8)/8, initial_bits_values-params['m']*8, (initial_bits_values-params['m']*8)/8)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
