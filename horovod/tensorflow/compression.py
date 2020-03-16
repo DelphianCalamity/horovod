@@ -158,7 +158,7 @@ class TopKCompressor(Compressor):
             bitstream_compressor = library.bitstream_compressor
 
             indices = tf.bitcast(indices, tf.uint32)
-            indices = tf.Print(indices, [indices], "Compress Indices:")
+            # indices = tf.Print(indices, [indices], "Compress Indices:")
             compressed_indices = bitstream_compressor(indices,
                                                       tf.train.get_or_create_global_step(),
                                                       logfile_suffix=params['logfile_suffix'],
@@ -166,7 +166,7 @@ class TopKCompressor(Compressor):
                                                       verbosity=params['verbosity'],
                                                       code=params['code'])
             compressed_indices = tf.bitcast(compressed_indices, tf.int32)
-            compressed_indices = tf.Print(compressed_indices, [compressed_indices], "Compress compressed Indices:")
+            # compressed_indices = tf.Print(compressed_indices, [compressed_indices], "Compress compressed Indices:")
         else:
             compressed_indices = indices
 
@@ -194,7 +194,7 @@ class TopKCompressor(Compressor):
             bitstream_decompressor = library.bitstream_decompressor
 
             indices = tf.bitcast(indices, tf.uint32)
-            indices = tf.Print(indices, [indices], "Decompress Indices:")
+            # indices = tf.Print(indices, [indices], "Decompress Indices:")
             decompressed_indices = bitstream_decompressor(indices, params['topk_k'],
                                                         tf.train.get_or_create_global_step(),
                                                         logfile_suffix=params['logfile_suffix'],
@@ -202,15 +202,15 @@ class TopKCompressor(Compressor):
                                                         suffix=params['suffix'],
                                                         verbosity=params['verbosity'],
                                                         code=params['code'])
-            decompressed_indices_size_uint = tf.math.reduce_prod(tf.shape(decompressed_indices))
+            # decompressed_indices_size_uint = tf.math.reduce_prod(tf.shape(decompressed_indices))
 
             decompressed_indices = tf.bitcast(decompressed_indices, tf.int32)
 
-            decompressed_indices_size = tf.math.reduce_prod(tf.shape(decompressed_indices))
-            decompressed_indices = tf.Print(decompressed_indices, [decompressed_indices], "Decompress decompressed Indices:")
+            # decompressed_indices_size = tf.math.reduce_prod(tf.shape(decompressed_indices))
+            # decompressed_indices = tf.Print(decompressed_indices, [decompressed_indices], "Decompress decompressed Indices:")
 
-            decompressed_indices = tf.Print(decompressed_indices, [compressed_tensor_size, params['topk_k'], compressed_tensor_size-params['topk_k'], decompressed_indices_size_uint, decompressed_indices_size],
-                              "\n\ntensor compressed_size, values_size, compressed_ind_size, decompressed_indices_size_uint, decompressed_indices_size:", summarize=-1)
+            # decompressed_indices = tf.Print(decompressed_indices, [compressed_tensor_size, params['topk_k'], compressed_tensor_size-params['topk_k'], decompressed_indices_size_uint, decompressed_indices_size],
+            #                   "\n\ntensor compressed_size, values_size, compressed_ind_size, decompressed_indices_size_uint, decompressed_indices_size:", summarize=-1)
         else:
             decompressed_indices = indices
 
