@@ -166,15 +166,14 @@ class TopKCompressor(Compressor):
                                                       verbosity=params['verbosity'],
                                                       code=params['code'])
             compressed_indices = tf.bitcast(compressed_indices, tf.int32)
-            compressed_indices_size = tf.math.reduce_prod(tf.shape(compressed_indices))
-
             # compressed_indices = tf.Print(compressed_indices, [compressed_indices], "Compress compressed Indices:")
         else:
             compressed_indices = indices
 
-        initial_bits_values = 32*k
-        params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+32*compressed_indices_size,
-                                           (initial_bits_values+32*compressed_indices_size)/8, initial_bits_values-32*compressed_indices_size, (initial_bits_values-32*compressed_indices_size)/8)
+        # compressed_indices_size = tf.math.reduce_prod(tf.shape(compressed_indices))
+        # initial_bits_values = 32*k
+        # params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+32*compressed_indices_size,
+        #                                    (initial_bits_values+32*compressed_indices_size)/8, initial_bits_values-32*compressed_indices_size, (initial_bits_values-32*compressed_indices_size)/8)
 
 
         tensor_compressed = tf.concat([values, compressed_indices], 0)

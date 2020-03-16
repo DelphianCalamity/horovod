@@ -118,6 +118,11 @@ public:
             fprintf(f, "Bitcompressed_tensor: %s\n", output->DebugString(output_flat.size()).c_str());
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
+
+            std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";
+            f = fopen(str1.c_str(),"w");
+            fprintf(f, "Initial_Size: %d  Final_Size: %d\n", input_tensor_flat.size(),  output_concat_dim);
+            fclose(f);
         }
         // *********************** For Debugging ********************** //
 
