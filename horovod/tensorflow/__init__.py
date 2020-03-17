@@ -80,7 +80,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
             'model_name': os.environ.get('HOROVOD_MODEL_NAME', 'resnet20_v2'),
             'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True')),
             'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
-            'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2))
+            'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2)),
+            'error_bound': float(os.environ.get('HOROVOD_ERROR_BOUND', 2e-10)),  # typical values: 2e-10, 2e-8, 2e-6
         }
 
 
@@ -103,6 +104,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["8bit"] = Compression.u8bit
     comp_dict["natural"] = Compression.natural
     comp_dict["sketch"] = Compression.sketch
+    comp_dict["inceptionn"] = Compression.inceptionn
     # testing
     if not params['compress_state']:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
@@ -128,6 +130,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     default_params['beta'] = 1.0
     default_params['gamma'] = 1.0
     default_params['compress_rank'] = 2
+    default_params['error_bound'] = 2e-10
 
     if params is None:
         params={}
