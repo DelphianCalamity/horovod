@@ -17,40 +17,40 @@ using namespace tensorflow;
 
 using namespace FastPForLib;
 
-REGISTER_OP("BitstreamCompressor")
+REGISTER_OP("IntegerCompressor")
 //.Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("logfile_suffix: int")       // For debugging
 .Attr("logs_path_suffix: int")     // For debugging
 .Attr("verbosity: int")            // For debugging
-//.Attr("code: string")
-.Input("input: uint32")             // Indices
+.Attr("code: string")
+.Input("input: uint32")
 .Input("step: int64")              // For debugging
-.Output("bitcompressed_tensor: uint32")
-.Doc(R"doc( bitstream compression )doc");
+.Output("intcompressed_tensor: uint32")
+.Doc(R"doc( Integer compression )doc");
 
-REGISTER_OP("BitstreamDecompressor")
+REGISTER_OP("IntegerDecompressor")
 //.Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("logfile_suffix: int")       // For debugging
 .Attr("logs_path_suffix: int")     // For debugging
 .Attr("suffix: int")                    // For debugging
 .Attr("verbosity: int")            // For debugging
-//.Attr("code: string")
+.Attr("code: string")
 .Input("input: uint32")
 .Input("decompressed_size: int32")
 .Input("step: int64")              // For debugging
 .Output("decompressed_tensor: uint32")
-.Doc(R"doc( bitstream decompression )doc");
+.Doc(R"doc( Integer decompression )doc");
 
 
-class BitstreamCompressorOp : public OpKernel {
+class IntegerCompressorOp : public OpKernel {
 
 public:
 
-    explicit BitstreamCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+    explicit IntegerCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
-//        OP_REQUIRES_OK(context, context->GetAttr("code", &code));
+        OP_REQUIRES_OK(context, context->GetAttr("code", &code));
     }
 
     void Compute(OpKernelContext *context) override {
@@ -60,20 +60,20 @@ public:
         size_t input_tensor_size = input_tensor_flat.size();
 
         IntegerCODEC &codec = *CODECFactory::getFromName(code);   // Pick a CODEC
-        std::vector<uint32> bitcompressed_output(input_tensor_size + 262144);
-        size_t bitcompressed_size = bitcompressed_output.size();
-        codec.encodeArray(input_tensor_flat.data(), input_tensor_size, bitcompressed_output.data(), bitcompressed_size);
+        std::vector<uint32> intcompressed_output(input_tensor_size + 262144);
+        size_t intcompressed_size = intcompressed_output.size();
+        codec.encodeArray(input_tensor_flat.data(), input_tensor_size, intcompressed_output.data(), intcompressed_size);
         // Shrink back the array:
-        bitcompressed_output.resize(bitcompressed_size);
-        bitcompressed_output.shrink_to_fit();
+        intcompressed_output.resize(intcompressed_size);
+        intcompressed_output.shrink_to_fit();
 
         // display compression rate:
         std::cout << std::setprecision(3);
-        std::cout << "You are using " << 32.0 * static_cast<double>(bitcompressed_output.size()) /
-                     static_cast<double>(input_tensor_flat.size()) << " bits per integer. " << std::endl;
+        std::cout << "You are using " << 32.0 * static_cast<double>(intcompressed_output.size()) /
+                     static_cast<double>(input_tensor_flat.size()) << " ints per integer. " << std::endl;
 
         // Create an output tensor
-        int output_concat_dim = bitcompressed_output.size() ;
+        int output_concat_dim = intcompressed_output.size() ;
         printf("output_concat_dim %d\n", output_concat_dim);
         TensorShape output_shape;
         output_shape.AddDim(output_concat_dim);
@@ -83,7 +83,7 @@ public:
         auto output_flat = output->template flat<uint32>();
         uint32* out_ptr = output_flat.data();
 
-        std::copy(bitcompressed_output.begin(), bitcompressed_output.end(), out_ptr);
+        std::copy(intcompressed_output.begin(), intcompressed_output.end(), out_ptr);
 
 
         //////
@@ -91,7 +91,7 @@ public:
         const uint32_t *ptr = input_tensor_flat.data();
         memcpy(init.data(), ptr, input_tensor_size*sizeof(int));
         std::vector<uint32_t> decompressed_output(input_tensor_size);
-        codec.decodeArray(bitcompressed_output.data(), output_concat_dim, decompressed_output.data(), input_tensor_size);
+        codec.decodeArray(intcompressed_output.data(), output_concat_dim, decompressed_output.data(), input_tensor_size);
         decompressed_output.resize(input_tensor_size);
 
         assert(std::equal(init.begin(), init.end(), decompressed_output.begin()) == 1);
@@ -111,11 +111,11 @@ public:
             if(systemRet == -1){
                 perror("mkdir failed");
             }
-            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/bitcompressor_logs_" + suffix + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/intcompressor_logs_" + suffix + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             fprintf(f, "input_tensor: %s\n", input_tensor.DebugString(input_tensor_flat.size()).c_str());
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
-            fprintf(f, "Bitcompressed_tensor: %s\n", output->DebugString(output_flat.size()).c_str());
+            fprintf(f, "intcompressed_tensor: %s\n", output->DebugString(output_flat.size()).c_str());
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
 
@@ -135,11 +135,11 @@ private:
     string code;
 };
 
-class BitstreamDecompressorOp : public OpKernel {
+class IntegerDecompressorOp : public OpKernel {
 
 public:
 
-    explicit BitstreamDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+    explicit IntegerDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));                       // For debugging
@@ -185,12 +185,12 @@ public:
             std::string str_suffix = std::to_string(logfile_suffix);
             std::string logs_suffix = std::to_string(logs_path_suffix);
             std::string str_step = std::to_string(step(0));
-            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + str_suffix + "/bitdecompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + str_suffix + "/intdecompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             fprintf(f, "input_tensor: %s\n", input_tensor.DebugString(input_tensor_flat.size()).c_str());
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
             fprintf(f, "recoveredsize: = %d\n\n", recoveredsize);
-            fprintf(f, "Bitdecompressed_tensor: %s\n", output->DebugString(output_flat.size()).c_str());
+            fprintf(f, "intdecompressed_tensor: %s\n", output->DebugString(output_flat.size()).c_str());
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
         }
@@ -206,7 +206,7 @@ private:
     string code;
 };
 
-REGISTER_KERNEL_BUILDER(Name("BitstreamCompressor").Device(DEVICE_CPU), BitstreamCompressorOp);
+REGISTER_KERNEL_BUILDER(Name("IntegerCompressor").Device(DEVICE_CPU), IntegerCompressorOp);
 
-REGISTER_KERNEL_BUILDER(Name("BitstreamDecompressor").Device(DEVICE_CPU), BitstreamDecompressorOp);
+REGISTER_KERNEL_BUILDER(Name("IntegerDecompressor").Device(DEVICE_CPU), IntegerDecompressorOp);
 

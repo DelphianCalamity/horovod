@@ -155,11 +155,11 @@ class TopKCompressor(Compressor):
 
             filename = resource_loader.get_path_to_datafile('mpi_lib.so')
             library = load_library.load_op_library(filename)
-            bitstream_compressor = library.bitstream_compressor
+            integer_compressor = library.integer_compressor
 
             indices = tf.bitcast(indices, tf.uint32)
             # indices = tf.Print(indices, [indices], "Compress Indices:")
-            compressed_indices = bitstream_compressor(indices,
+            compressed_indices = integer_compressor(indices,
                                                       tf.train.get_or_create_global_step(),
                                                       logfile_suffix=params['logfile_suffix'],
                                                       logs_path_suffix=params['logs_path_suffix'],
@@ -169,12 +169,6 @@ class TopKCompressor(Compressor):
             # compressed_indices = tf.Print(compressed_indices, [compressed_indices], "Compress compressed Indices:")
         else:
             compressed_indices = indices
-
-        # compressed_indices_size = tf.math.reduce_prod(tf.shape(compressed_indices))
-        # initial_bits_values = 32*k
-        # params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+32*compressed_indices_size,
-        #                                    (initial_bits_values+32*compressed_indices_size)/8, initial_bits_values-32*compressed_indices_size, (initial_bits_values-32*compressed_indices_size)/8)
-
 
         tensor_compressed = tf.concat([values, compressed_indices], 0)
         ctx = tensor_shape
@@ -197,11 +191,11 @@ class TopKCompressor(Compressor):
         if params['code'] is not None:
             filename = resource_loader.get_path_to_datafile('mpi_lib.so')
             library = load_library.load_op_library(filename)
-            bitstream_decompressor = library.bitstream_decompressor
+            integer_decompressor = library.integer_decompressor
 
             indices = tf.bitcast(indices, tf.uint32)
             # indices = tf.Print(indices, [indices], "Decompress Indices:")
-            decompressed_indices = bitstream_decompressor(indices, params['topk_k'],
+            decompressed_indices = integer_decompressor(indices, params['topk_k'],
                                                         tf.train.get_or_create_global_step(),
                                                         logfile_suffix=params['logfile_suffix'],
                                                         logs_path_suffix=params['logs_path_suffix'],
