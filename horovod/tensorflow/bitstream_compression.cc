@@ -15,7 +15,6 @@
 
 using namespace tensorflow;
 
-using namespace FastPForLib;
 
 REGISTER_OP("BitstreamCompressor")
 //.Attr("T: {int32, int64, float16, float32, float64}")
@@ -23,9 +22,10 @@ REGISTER_OP("BitstreamCompressor")
 .Attr("logs_path_suffix: int")     // For debugging
 .Attr("verbosity: int")            // For debugging
 //.Attr("code: string")
-.Input("input: uint32")             // Indices
+.Input("indices: int32")             // Indices
+.Input("initial_tensor_size: int32")
 .Input("step: int64")              // For debugging
-.Output("bitcompressed_tensor: uint32")
+.Output("bitcompressed_tensor: int8")
 .Doc(R"doc( bitstream compression )doc");
 
 REGISTER_OP("BitstreamDecompressor")
@@ -35,7 +35,7 @@ REGISTER_OP("BitstreamDecompressor")
 .Attr("suffix: int")                    // For debugging
 .Attr("verbosity: int")            // For debugging
 //.Attr("code: string")
-.Input("input: uint32")
+.Input("input: int8")
 .Input("decompressed_size: int32")
 .Input("step: int64")              // For debugging
 .Output("decompressed_tensor: uint32")
@@ -55,22 +55,35 @@ public:
 
     void Compute(OpKernelContext *context) override {
 
-        const Tensor &input_tensor = context->input(0);
-        auto input_tensor_flat = input_tensor.flat<uint32_t>();
-        size_t input_tensor_size = input_tensor_flat.size();
+        const Tensor &indices_tensor = context->input(0);
+        auto indices_tensor_flat = indices_tensor.flat<uint32_t>();
+        size_t indices_tensor_size = indices_tensor_flat.size();
 
-        IntegerCODEC &codec = *CODECFactory::getFromName(code);   // Pick a CODEC
-        std::vector<uint32> bitcompressed_output(input_tensor_size + 262144);
-        size_t bitcompressed_size = bitcompressed_output.size();
-        codec.encodeArray(input_tensor_flat.data(), input_tensor_size, bitcompressed_output.data(), bitcompressed_size);
-        // Shrink back the array:
-        bitcompressed_output.resize(bitcompressed_size);
-        bitcompressed_output.shrink_to_fit();
+        size_t initial_tensor_size = context->input(1).flat<int32_t>().size();
 
-        // display compression rate:
-        std::cout << std::setprecision(3);
-        std::cout << "You are using " << 32.0 * static_cast<double>(bitcompressed_output.size()) /
-                     static_cast<double>(input_tensor_flat.size()) << " bits per integer. " << std::endl;
+        // Build the bitsream vector that is to be encoded
+        std::vector<int8_t> bitstream(initial_tensor_size, 0);
+        unsigned int bit_pos, byte_pos, byte, value;
+        for (int i=0; i<indices_tensor_size; i++) {
+                byte_pos = hash/8;
+                bit_pos = hash%8;
+                byte = bitstream[byte_pos];
+                value = 1;
+                value = value << bit_pos;
+                value = value | byte;
+                bitstream[byte_pos] = value;
+        }
+
+
+        // Binary Run Length Encoding
+        // Let s ← 0.
+        // While there are bits to encode:
+        // Read the next n consecutive bits equal to s.
+        // Write n.
+        // s ← (s + 1)modulus2.
+
+
+
 
         // Create an output tensor
         int output_concat_dim = bitcompressed_output.size() ;
@@ -96,6 +109,8 @@ public:
 
         assert(std::equal(init.begin(), init.end(), decompressed_output.begin()) == 1);
         /////
+
+
 
         // *********************** For Debugging ********************** //
         const Tensor &step_tensor = context->input(1);
