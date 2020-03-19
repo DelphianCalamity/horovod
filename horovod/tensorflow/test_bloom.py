@@ -9,6 +9,7 @@ log_init_tensor = tf.bitcast(init_tensor, tf.int32)
 
 
 _, indices = tf.math.top_k(tf.math.abs(init_tensor), k, sorted=False)
+indices = tf.sort(indices, axis=0, direction='ASCENDING')
 values = tf.gather(init_tensor, indices)
 with tf.Session() as sess:
 	print("Values Int: ", sess.run(values))
