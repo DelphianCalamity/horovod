@@ -4,7 +4,7 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
-#include "../compression_utils.h"
+#include "../compression_utils.hpp"
 
 #include <assert.h>
 #include <string>
@@ -142,7 +142,7 @@ public:
             FILE* f = fopen(str.c_str(),"w");
             fprintf(f, "indices_tensor: %s\n", indices_tensor.DebugString(indices_tensor_flat.size()).c_str());
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
-            fprint(f, tensor_size_bytes, bitstream);
+            CompressionUtilities::fprint(f, tensor_size_bytes, bitstream);
             fprintf(f, "Output: %s\n", output->DebugString(output_flat.size()).c_str());
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);

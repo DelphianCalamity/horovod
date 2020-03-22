@@ -7,6 +7,7 @@
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
 #include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 #include "../../third_party/bloomfilter/inc/MurmurHash.hpp"
+#include "./compression_utils.hpp`"
 
 #include <string>
 
@@ -128,7 +129,7 @@ public:
             fprintf(f, "decompressed size: %d\n\n", decompressed_size);
             fprintf(f, "Bloom size: = %d\n", bloom_size);
             bloom_filter.fprint(f);
-            fprintf(f, "Values Vector:"); print_vector(values_vec, values_size, f);
+            fprintf(f, "Values Vector:"); CompressionUtilities::print_vector(values_vec, values_size, f);
             fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
             fprintf(f, "########################################################################################\n\n");
             fclose (f);

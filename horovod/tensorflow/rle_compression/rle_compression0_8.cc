@@ -4,7 +4,7 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
-#include "../compression_utils.h"
+#include "../compression_utils.hpp"
 
 #include <assert.h>
 #include <string>
@@ -160,9 +160,9 @@ public:
             FILE* f = fopen(str.c_str(),"w");
             fprintf(f, "indices_tensor: %s\n", indices_tensor.DebugString(indices_tensor_flat.size()).c_str());
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
-            fprint(f, tensor_size_bytes, bitstream);
+            CompressionUtilities::fprint(f, tensor_size_bytes, bitstream);
             fprintf(f, "Lengths:\n");
-            print_vector(lengths.data(), lengths.size(), f);
+            CompressionUtilities::print_vector(lengths.data(), lengths.size(), f);
             fprintf(f, "Encoded lengths: %s\n", output->DebugString(output_flat.size()).c_str());
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
@@ -252,7 +252,7 @@ public:
             fprintf(f, "encoding_flat: %s\n", encoding.DebugString(encoding_flat.size()).c_str());
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
             fprintf(f, "Lenghts:\n");
-            print_vector(lengths.data(), lengths.size(), f);
+            CompressionUtilities::print_vector(lengths.data(), lengths.size(), f);
             fprintf(f, "Indices: %s\n", output->DebugString(output_flat.size()).c_str());
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
