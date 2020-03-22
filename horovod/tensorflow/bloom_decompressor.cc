@@ -1,4 +1,3 @@
-
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -60,15 +59,6 @@ namespace std {
 };
 }
 
-
-void print_vector(int* vec, int size, FILE* f) {
-    fprintf(f, "\n[");
-    int i=0;
-    for (i = 0; i < size-1; i++) {
-        fprintf(f, "%d, ", (int) vec[i]);
-    }
-    fprintf(f, "%d]\n\n", (int) vec[i]);
-}
 
 class BloomDecompressorOp : public OpKernel {
 

@@ -144,53 +144,61 @@ class TopKCompressor(Compressor):
         tensor_flatten = tf.reshape(tensor, [-1])
         elemnum = tensor_flatten.get_shape().as_list()[0]
         compress_ratio = params["compress_ratio"]
-
         k = max(1, int(elemnum * compress_ratio))
         params['topk_k'] = k
-
-        # _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k)
-        # values = tf.gather(tensor_flatten, indices)
-        # values = tf.bitcast(values, tf.int32)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
         values = tf.gather(tensor_flatten, indices)
-        values = tf.bitcast(values, tf.int32)
+        params['values_shape'] = tf.shape(values)
 
-        if params['encoding'] == "integer_compression":
-
+        if params['encoding'] is not None:
             filename = resource_loader.get_path_to_datafile('mpi_lib.so')
             library = load_library.load_op_library(filename)
-            integer_compressor = library.integer_compressor
 
-            indices = tf.bitcast(indices, tf.uint32)
-            # indices = tf.Print(indices, [indices], "Compress Indices:")
-            compressed_indices = integer_compressor(indices,
+            if params['encoding'] == "integer_compression":
+                integer_compressor = library.integer_compressor
+                
+                values = tf.bitcast(values, tf.int32)
+                indices = tf.bitcast(indices, tf.uint32)
+                # indices = tf.Print(indices, [indices], "Compress Indices:")
+                compressed_indices = integer_compressor(indices,
+                                                          tf.train.get_or_create_global_step(),
+                                                          logfile_suffix=params['logfile_suffix'],
+                                                          logs_path_suffix=params['logs_path_suffix'],
+                                                          verbosity=params['verbosity'],
+                                                          code=params['code'])
+                compressed_indices = tf.bitcast(compressed_indices, tf.int32)
+                # compressed_indices = tf.Print(compressed_indices, [compressed_indices], "Compress compressed Indices:")
+
+            elif params['encoding'] == "rle_compression":
+                if params['code'] == "0_8":
+                    rle_compressor = library.rle_compressor_v0_code8
+                    values = tf.bitcast(values, tf.uint8)
+                    values = tf.reshape(values, [-1])
+
+                elif params['code'] == "1_8":
+                    rle_compressor = library.rle_compressor_v1_code8
+                    values = tf.bitcast(values, tf.uint8)
+                    values = tf.reshape(values, [-1])
+
+                elif params['code'] == "0_32":
+                    rle_compressor = library.rle_compressor_v0_code32
+                    values = tf.bitcast(values, tf.int32)
+
+                elif params['code'] == "1_32":
+                    rle_compressor = library.rle_compressor_v1_code32
+                    values = tf.bitcast(values, tf.int32)
+
+                compressed_indices = rle_compressor(indices, elemnum,
                                                       tf.train.get_or_create_global_step(),
                                                       logfile_suffix=params['logfile_suffix'],
                                                       logs_path_suffix=params['logs_path_suffix'],
-                                                      verbosity=params['verbosity'],
-                                                      code=params['code'])
-            compressed_indices = tf.bitcast(compressed_indices, tf.int32)
-            # compressed_indices = tf.Print(compressed_indices, [compressed_indices], "Compress compressed Indices:")
-
-        elif params['encoding'] == "bitstream_compression":
-
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
-            library = load_library.load_op_library(filename)
-            bitstream_compressor = library.bitstream_compressor
-
-            compressed_indices = bitstream_compressor(indices, elemnum,
-                                                      tf.train.get_or_create_global_step(),
-                                                      logfile_suffix=params['logfile_suffix'],
-                                                      logs_path_suffix=params['logs_path_suffix'],
-                                                      verbosity=params['verbosity'],
-                                                      # code=params['code']
-                                                      )
-
+                                                      verbosity=params['verbosity'])
         else:
             compressed_indices = indices
 
+        params['values_size'] = values.get_shape().as_list()[0]
         tensor_compressed = tf.concat([values, compressed_indices], 0)
         ctx = tensor_shape
         # params['tensors_size_are_same'] = True
@@ -201,50 +209,46 @@ class TopKCompressor(Compressor):
         """Decompress by filling empty slots with zeros and reshape back using the original shape"""
 
         compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
-        # compressed_tensor_size = tf.Print(compressed_tensor_size, [compressed_tensor_size], "compressed_tensor_size:")
 
-        values, indices = tf.split(tensor_compressed, [params['topk_k'], compressed_tensor_size-params['topk_k']])
+        values, indices = tf.split(tensor_compressed, [params['values_size'], compressed_tensor_size-params['values_size']])
+        values = tf.reshape(values, params['values_shape'])
         values = tf.bitcast(values, tf.float32)
 
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
-        if params['encoding'] == "integer_compression":
+        if params['encoding'] is not None:
             filename = resource_loader.get_path_to_datafile('mpi_lib.so')
             library = load_library.load_op_library(filename)
-            integer_decompressor = library.integer_decompressor
 
-            indices = tf.bitcast(indices, tf.uint32)
-            # indices = tf.Print(indices, [indices], "Decompress Indices:")
-            decompressed_indices = integer_decompressor(indices, params['topk_k'],
+            if params['encoding'] == "integer_compression":
+                integer_decompressor = library.integer_decompressor
+                indices = tf.bitcast(indices, tf.uint32)
+                decompressed_indices = integer_decompressor(indices, params['topk_k'],
+                                                            tf.train.get_or_create_global_step(),
+                                                            logfile_suffix=params['logfile_suffix'],
+                                                            logs_path_suffix=params['logs_path_suffix'],
+                                                            suffix=params['suffix'],
+                                                            verbosity=params['verbosity'],
+                                                            code=params['code'])
+                decompressed_indices = tf.bitcast(decompressed_indices, tf.int32)
+
+            elif params['encoding'] == "rle_compression":
+                if params['code'] == "0_8":
+                    rle_decompressor = library.rle_decompressor_v0_code8
+                elif params['code'] == "1_8":
+                    rle_decompressor = library.rle_decompressor_v1_code8
+                elif params['code'] == "0_32":
+                    rle_decompressor = library.rle_decompressor_v0_code32
+                elif params['code'] == "1_32":
+                    rle_decompressor = library.rle_decompressor_v1_code32
+
+                decompressed_indices = rle_decompressor(indices, params['topk_k'],
                                                         tf.train.get_or_create_global_step(),
                                                         logfile_suffix=params['logfile_suffix'],
                                                         logs_path_suffix=params['logs_path_suffix'],
                                                         suffix=params['suffix'],
-                                                        verbosity=params['verbosity'],
-                                                        code=params['code'])
-            # decompressed_indices_size_uint = tf.math.reduce_prod(tf.shape(decompressed_indices))
-            decompressed_indices = tf.bitcast(decompressed_indices, tf.int32)
-            # decompressed_indices_size = tf.math.reduce_prod(tf.shape(decompressed_indices))
-            # decompressed_indices = tf.Print(decompressed_indices, [decompressed_indices], "Decompress decompressed Indices:")
-
-        elif params['encoding'] == "bitstream_compression":
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
-            library = load_library.load_op_library(filename)
-            bitstream_decompressor = library.bitstream_decompressor
-
-            # indices = tf.bitcast(indices, tf.uint32)
-            # indices = tf.Print(indices, [indices], "Decompress Indices:")
-            decompressed_indices = bitstream_decompressor(indices, params['topk_k'],
-                                                        tf.train.get_or_create_global_step(),
-                                                        logfile_suffix=params['logfile_suffix'],
-                                                        logs_path_suffix=params['logs_path_suffix'],
-                                                        suffix=params['suffix'],
-                                                        verbosity=params['verbosity'],
-                                                        code=params['code'])
-            # decompressed_indices_size_uint = tf.math.reduce_prod(tf.shape(decompressed_indices))
-            # decompressed_indices = tf.bitcast(decompressed_indices, tf.int32)
-
+                                                        verbosity=params['verbosity'])
         else:
             decompressed_indices = indices
 

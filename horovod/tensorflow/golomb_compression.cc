@@ -13,7 +13,7 @@
 using namespace tensorflow;
 
 
-REGISTER_OP("BitstreamCompressor")
+REGISTER_OP("GolombCompression")
 //.Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("logfile_suffix: int")       // For debugging
 .Attr("logs_path_suffix: int")     // For debugging
@@ -25,7 +25,7 @@ REGISTER_OP("BitstreamCompressor")
 .Output("bitcompressed_tensor: int32")
 .Doc(R"doc( bitstream compression )doc");
 
-REGISTER_OP("BitstreamDecompressor")
+REGISTER_OP("GolombDecompression")
 //.Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("logfile_suffix: int")       // For debugging
 .Attr("logs_path_suffix: int")     // For debugging
@@ -58,17 +58,18 @@ void fprint(FILE* f, int size, std::vector<int8_t> ptr) {
 
 }
 
-class BitstreamCompressorOp : public OpKernel {
+class GolombCompressionOp : public OpKernel {
 
 public:
 
-    explicit BitstreamCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+    explicit GolombCompressionOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
 //        OP_REQUIRES_OK(context, context->GetAttr("code", &code));
     }
-
+//010011100010101010 N= initial_tensor_size bits would send
+// output.size * 32 sent
     void Compute(OpKernelContext *context) override {
 
         const Tensor &indices_tensor = context->input(0);
@@ -112,22 +113,22 @@ public:
             if ((value^byte) != 0) {    // It's 0
                 if (current == 0) {
                     count++;
-                    printf("0_cur_0 count=%d\n", count);
+//                    printf("0_cur_0 count=%d\n", count);
 
                 } else {
                     encode.push_back(count);
                     count=1; current=0;
-                    printf("0_cur_1 count=%d\n", count);
+//                    printf("0_cur_1 count=%d\n", count);
                 }
             } else {                    // It's 1
                 if (current == 1) {
                     count++;
-                    printf("1_cur_1 count=%d\n", count);
+//                    printf("1_cur_1 count=%d\n", count);
 
                 } else {
                     encode.push_back(count);
                     count=1; current=1;
-                    printf("1_cur_0 count=%d\n", count);
+//                    printf("1_cur_0 count=%d\n", count);
                 }
             }
         }
@@ -183,10 +184,10 @@ public:
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
 
-//            std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";
-//            f = fopen(str1.c_str(),"w");
-//            fprintf(f, "Initial_Size: %d  Final_Size: %d\n", input_tensor_flat.size(),  output_concat_dim);
-//            fclose(f);
+            std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";
+            f = fopen(str1.c_str(),"w");
+            fprintf(f, "Initial_Size: %d  Final_Size: %d\n", initial_tensor_size,  output_concat_dim*32 + 32); // in bits // worker sends the siae of the encoded tensor
+            fclose(f);
         }
         // *********************** For Debugging ********************** //
 
@@ -199,11 +200,11 @@ private:
 //    string code;
 };
 
-class BitstreamDecompressorOp : public OpKernel {
+class GolombDecompressionOp : public OpKernel {
 
 public:
 
-    explicit BitstreamDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+    explicit GolombDecompressionOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));                       // For debugging
@@ -275,7 +276,7 @@ private:
 //    string code;
 };
 
-REGISTER_KERNEL_BUILDER(Name("BitstreamCompressor").Device(DEVICE_CPU), BitstreamCompressorOp);
+REGISTER_KERNEL_BUILDER(Name("GolombCompression").Device(DEVICE_CPU), GolombCompressionOp);
 
-REGISTER_KERNEL_BUILDER(Name("BitstreamDecompressor").Device(DEVICE_CPU), BitstreamDecompressorOp);
+REGISTER_KERNEL_BUILDER(Name("GolombDecompression").Device(DEVICE_CPU), GolombDecompressionOp);
 

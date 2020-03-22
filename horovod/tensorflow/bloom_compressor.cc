@@ -1,4 +1,3 @@
-
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -8,6 +7,7 @@
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
 #include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 #include "../../third_party/bloomfilter/inc/MurmurHash.hpp"
+#include "./compression_utils.h"
 
 #include <string>
 #include <cstdlib>
@@ -156,6 +156,11 @@ public:
             std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/fpr_" + suffix + ".txt";
             f = fopen(str1.c_str(),"w");
             fprintf(f, "FalsePositives: %d  Total: %d\n", false_positives,  initial_flat.size());
+            fclose(f);
+
+            std::string str3 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";
+            f = fopen(str3.c_str(),"w");
+            fprintf(f, "Initial_Size: %d  Final_Size: %d\n", initial_flat.size() /*in bits*/,  bloom_size*8 /*in bits*/);
             fclose(f);
 
             std::string str2 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/hashes_" + suffix + ".txt";

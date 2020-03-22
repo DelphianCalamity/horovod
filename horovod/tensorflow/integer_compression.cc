@@ -86,16 +86,16 @@ public:
         std::copy(intcompressed_output.begin(), intcompressed_output.end(), out_ptr);
 
 
-        //////
-        std::vector<uint32> init(input_tensor_size);
-        const uint32_t *ptr = input_tensor_flat.data();
-        memcpy(init.data(), ptr, input_tensor_size*sizeof(int));
-        std::vector<uint32_t> decompressed_output(input_tensor_size);
-        codec.decodeArray(intcompressed_output.data(), output_concat_dim, decompressed_output.data(), input_tensor_size);
-        decompressed_output.resize(input_tensor_size);
-
-        assert(std::equal(init.begin(), init.end(), decompressed_output.begin()) == 1);
-        /////
+//        //////
+//        std::vector<uint32> init(input_tensor_size);
+//        const uint32_t *ptr = input_tensor_flat.data();
+//        memcpy(init.data(), ptr, input_tensor_size*sizeof(int));
+//        std::vector<uint32_t> decompressed_output(input_tensor_size);
+//        codec.decodeArray(intcompressed_output.data(), output_concat_dim, decompressed_output.data(), input_tensor_size);
+//        decompressed_output.resize(input_tensor_size);
+//
+//        assert(std::equal(init.begin(), init.end(), decompressed_output.begin()) == 1);
+//        /////
 
         // *********************** For Debugging ********************** //
         const Tensor &step_tensor = context->input(1);
@@ -121,7 +121,7 @@ public:
 
             std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";
             f = fopen(str1.c_str(),"w");
-            fprintf(f, "Initial_Size: %d  Final_Size: %d\n", input_tensor_flat.size(),  output_concat_dim);
+            fprintf(f, "Initial_Size: %d  Final_Size: %d\n", input_tensor_flat.size()*32,  output_concat_dim*32 + 32);
             fclose(f);
         }
         // *********************** For Debugging ********************** //
