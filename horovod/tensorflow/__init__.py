@@ -85,10 +85,11 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     comp_dict["natural"] = Compression.natural
     comp_dict["sketch"] = Compression.sketch
     comp_dict["bloom"] = Compression.bloom
+    comp_dict["bloom_adaptive"] = Compression.bloom_adaptive
     # testing
     if params['compress_state'] == False:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
-                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch', 'bloom']:
+                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch', 'bloom', 'bloom_adaptive']:
             comp_dict[method] = Compression.fake
 
     default_params = {}

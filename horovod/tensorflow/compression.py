@@ -1523,3 +1523,4 @@ class Compression(object):
     sketch = SketchCompressor
     fake = FakeCompressor
     bloom = Bloom_Filter_Compressor
+    bloom_adaptive = Bloom_Filter_Adaptive_Compressor
