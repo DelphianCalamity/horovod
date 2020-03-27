@@ -361,6 +361,85 @@ class Bloom_Filter_Compressor(Compressor):
         return decompressed_tensor
 
 
+class Bloom_Filter_Adaptive_Compressor(Compressor):
+
+    @staticmethod
+    def compress(tensor, params):
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
+        k = max(1, int(elemnum * compress_ratio))
+
+        params['m'] = 100000
+        params['k'] = 3
+
+        if params["partitioning"] is None:
+            params["partitioning"] = 1
+        if params["bloom_size"] is not None:
+            params['m'] = params['bloom_size']
+        if params["fpr"] is not None:
+            m = (k * abs(math.log(params["fpr"]))) / (math.pow(math.log(2), 2))
+            params['m'] = m
+
+        # Give bloom size in number of bytes - bloom size must be a multiple of 8
+        params['m'] = int(math.ceil(params['m']/8))
+        if params['m'] % 8 != 0:
+            params['m'] += 1
+        assert params['k'] < 256, "Number of hash functions too big"
+
+        params["bloom_config"].add_data(k, params['m']*8, params['k'], params["fpr"])
+        params["throughput_info"].add_data(elemnum, elemnum/8,  params['m']*8, (params['m']*8)/8, elemnum-params['m']*8, (elemnum-params['m']*8)/8)
+
+        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
+        indices = tf.sort(indices, axis=0, direction='ASCENDING')
+        values = tf.gather(tensor_flatten, indices)
+        values = tf.bitcast(values, tf.int32)
+
+        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        library = load_library.load_op_library(filename)
+        bloom_adaptive_compressor = library.bloom_adaptive_compressor
+
+        log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
+        compressed_tensor = bloom_adaptive_compressor(values, indices,
+                                             log_initial_tensor,
+                                             tf.train.get_or_create_global_step(),
+                                             partitioning=params['partitioning'],
+                                             bloom_size=params['m'],
+                                             logfile_suffix=params['logfile_suffix'],
+                                             logs_path_suffix=params['logs_path_suffix'],
+                                             verbosity=params['verbosity'])
+        ctx = tensor_shape
+        params['tensors_size_are_same'] = True
+        return compressed_tensor, ctx
+
+    @staticmethod
+    def decompress(compressed_tensor, ctx, params):
+        """Decompress by filling empty slots with zeros and reshape back using the original shape"""
+
+        tensor_shape = ctx
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+
+        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        library = load_library.load_op_library(filename)
+        bloom_adaptive_decompressor = library.bloom_adaptive_decompressor
+
+        decompressed_tensor = bloom_adaptive_decompressor(compressed_tensor, tensor_size,
+                                                 tf.train.get_or_create_global_step(),
+                                                 partitioning=params['partitioning'],
+                                                 bloom_size=params['m'],
+                                                 logfile_suffix=params['logfile_suffix'],
+                                                 logs_path_suffix=params['logs_path_suffix'],
+                                                 suffix=params['suffix'],
+                                                 verbosity=params['verbosity'])
+
+        decompressed_tensor = tf.bitcast(decompressed_tensor, tf.float32)
+        decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
+        return decompressed_tensor
+
+
+
 class ThresholdCompressor(Compressor):
     """"""
 
