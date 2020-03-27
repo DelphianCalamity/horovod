@@ -55,6 +55,15 @@ public:
         }
         fprintf(f, "%d]\n\n", (int) vec[i]);
     }
+
+    static void print_vector(int* vec, int size) {
+        printf("\n[");
+        int i=0;
+        for (i = 0; i < size-1; i++) {
+            printf("%d, ", (int) vec[i]);
+        }
+        printf("%d]\n\n", (int) vec[i]);
+    }
 };
 
 #endif

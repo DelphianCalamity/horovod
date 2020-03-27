@@ -146,11 +146,11 @@ class TopKCompressor(Compressor):
         compress_ratio = params["compress_ratio"]
         k = max(1, int(elemnum * compress_ratio))
         params['topk_k'] = k
+        params['values_size'] = k
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')
         values = tf.gather(tensor_flatten, indices)
-        params['values_shape'] = tf.shape(values)
 
         if params['encoding'] is not None:
             filename = resource_loader.get_path_to_datafile('mpi_lib.so')
@@ -174,21 +174,31 @@ class TopKCompressor(Compressor):
             elif params['encoding'] == "rle_compression":
                 if params['code'] == "0_8":
                     rle_compressor = library.rle_compressor_v0_code8
+                    print("\n\nShape PreFloat32\n\n:", values.shape)
                     values = tf.bitcast(values, tf.uint8)
+                    values_shape = tf.shape(values)
+                    print("\n\nShape Uint8\n\n:", values.shape)
                     values = tf.reshape(values, [-1])
+                    params['values_size'] = k*4
+                    print(params['values_size'])
+                    print("\n\nShape uint8 flatten\n\n:", values.shape)
 
                 elif params['code'] == "1_8":
                     rle_compressor = library.rle_compressor_v1_code8
                     values = tf.bitcast(values, tf.uint8)
+                    values_shape = tf.shape(values)
                     values = tf.reshape(values, [-1])
+                    params['values_size'] = k*4
 
                 elif params['code'] == "0_32":
                     rle_compressor = library.rle_compressor_v0_code32
                     values = tf.bitcast(values, tf.int32)
+                    params['values_size'] = k
 
                 elif params['code'] == "1_32":
                     rle_compressor = library.rle_compressor_v1_code32
                     values = tf.bitcast(values, tf.int32)
+                    params['values_size'] = k
 
                 compressed_indices = rle_compressor(indices, elemnum,
                                                       tf.train.get_or_create_global_step(),
@@ -198,9 +208,8 @@ class TopKCompressor(Compressor):
         else:
             compressed_indices = indices
 
-        params['values_size'] = values.get_shape().as_list()[0]
         tensor_compressed = tf.concat([values, compressed_indices], 0)
-        ctx = tensor_shape
+        ctx = [tensor_shape, values_shape]
         # params['tensors_size_are_same'] = True
         return tensor_compressed, ctx
 
@@ -211,10 +220,13 @@ class TopKCompressor(Compressor):
         compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
 
         values, indices = tf.split(tensor_compressed, [params['values_size'], compressed_tensor_size-params['values_size']])
-        values = tf.reshape(values, params['values_shape'])
+        print("\n\nShape Uint flatten\n\n:", values.shape)
+
+        values = tf.reshape(values, ctx[1])
+        print("\n\nShape Uint8 unflatten\n\n:", values.shape)
         values = tf.bitcast(values, tf.float32)
 
-        tensor_shape = ctx
+        tensor_shape = ctx[0]
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
         if params['encoding'] is not None:
@@ -293,15 +305,13 @@ class Bloom_Filter_Compressor(Compressor):
 
         # Give bloom size in number of bytes
         # bloom size must be a multiple of 8
-        params['m'] = int(params['m']/8)
+        params['m'] = int(math.ceil(params['m']/8))
         if params['m'] % 8 != 0:
             params['m'] += 1
         assert params['k'] < 256, "Number of hash functions too big"
 
         params["bloom_config"].add_data(k, params['m']*8, params['k'], params["fpr"])
-        initial_bits_values = 32*k
-        params["throughput_info"].add_data(2*initial_bits_values, (2*initial_bits_values)/8,  initial_bits_values+params['m']*8,
-                                           (initial_bits_values+params['m']*8)/8, initial_bits_values-params['m']*8, (initial_bits_values-params['m']*8)/8)
+        params["throughput_info"].add_data(elemnum, elemnum/8,  params['m']*8, (params['m']*8)/8, elemnum-params['m']*8, (elemnum-params['m']*8)/8)
 
         _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         indices = tf.sort(indices, axis=0, direction='ASCENDING')

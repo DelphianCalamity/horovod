@@ -78,7 +78,7 @@ public:
 
         /////////////////////////////////////////////////////////////////
         std::vector<int> lengths;
-        int zeros_count=0, ones_count=0;
+        int zeros_count=0, ones_count=1;
 
         // Binary Run Length Encoding
         for (int i=0; i<initial_tensor_size; i++) {
