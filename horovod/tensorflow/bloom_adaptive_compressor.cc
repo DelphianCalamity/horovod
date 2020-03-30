@@ -64,10 +64,10 @@ public:
         return 0;
     }
 
-    int infer_k(float k, int items_partitions) {
+    float infer_k(float k, int items_partitions) {
         // Assume that the topk values are uniformly distributed inside the tensor
         int x = ceil(k/items_partitions);
-        return x;
+        return k/items_partitions;
     }
 
     void infer_blooms_sizes(int bloom_size, float partitioning, std::vector<int>* bloom_sizes) {
@@ -112,11 +112,20 @@ public:
 
         std::vector<bloom::OrdinaryBloomFilter<uint32_t>*> blooms;
         bloom::OrdinaryBloomFilter<uint32_t>* bloom;
+        std::vector<int> false_positives_vec;
+        std::vector<float> fpr;
+        std::vector<int> hash_nums;
+
+
         for (int i=0; i<bloom_sizes.size(); i++) {
 
             m = bloom_sizes[i];
-            hash_num = int(ceil((m/k)*log(2)));
+            hash_num = int(ceil((m*8/k)*log(2)));
+            hash_nums.push_back(hash_num);
             assert(hash_num > 0);
+
+            float a = -hash_num*k/m;
+            fpr.push_back(pow(1-exp(a), hash_num));
 
             partition_size = ceil(items/partitions_num);
             partitions_num--;
@@ -151,7 +160,6 @@ public:
             items=items_space_size;
             partitions_num=bloom_sizes.size();
             int false_positives;
-            std::vector<int> false_positives_vec;
             std::vector<int> partition_size_vec;
 
             for (int i=0; i<bloom_sizes.size(); i++) {
@@ -188,8 +196,16 @@ public:
             fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
             fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
             fprintf(f, "Partitioning: %f\n", partitioning);
-            fprintf(f, "Item partitions: %d\n", bloom_sizes.size());
+            fprintf(f, "Partitions: %f\n");
+            fprintf(f, "Item partitions: %d", bloom_sizes.size());
+            CompressionUtilities::print_vector(partition_size_vec.data(), partition_size_vec.size(), f);
+
             fprintf(f, "Inferred K: %f\n\n", k);
+            fprintf(f, "Hash_Nums: ");
+            for (int i=0; i<hash_nums.size(); i++) {
+                fprintf(f, "%d, ", hash_nums[i]);
+            }
+            fprintf(f, "\n\n");
 
             fprintf(f, "Bloom Sizes:");
             CompressionUtilities::print_vector(bloom_sizes.data(), bloom_sizes.size(), f);
@@ -198,7 +214,7 @@ public:
             }
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
             for (int i=0; i<false_positives_vec.size(); i++) {
-                fprintf(f, "FalsePositives: %d Total: %d\n", false_positives_vec[i], partition_size_vec[i]);
+                fprintf(f, "FalsePositives: %d Total: %d fpr: %f\n", false_positives_vec[i], partition_size_vec[i], (float) false_positives_vec[i]/partition_size_vec[i]);
             }
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
@@ -206,9 +222,28 @@ public:
             std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/fpr_" + suffix + ".txt";
             f = fopen(str1.c_str(),"w");
             for (int i=0; i<false_positives_vec.size(); i++) {
-                fprintf(f, "FalsePositives: %d Total: %d\n", false_positives_vec[i], partition_size_vec[i]);
+                fprintf(f, "FalsePositives: %d Total: %d fpr: %f\n", false_positives_vec[i], partition_size_vec[i], (float) false_positives_vec[i]/partition_size_vec[i]);
             }
+            fprintf(f, "\n");
             fclose(f);
+
+            std::string str4 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/estimated_fpr_" + suffix + ".txt";
+            f = fopen(str4.c_str(),"w");
+            fprintf(f, "FPR_estimated: \n");
+            for (int i=0; i<fpr.size(); i++) {
+                fprintf(f, "%f ", fpr[i]);
+            }
+            fprintf(f, "\n");
+            fclose(f);
+
+//            std::string str5 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/estimated_fpr_avg" + suffix + ".txt";
+//            f = fopen(str5.c_str(),"w");
+//            fprintf(f, "FPR_estimated_avg: \n");
+//            for (int i=0; i<fpr.size(); i++) {
+//                fprintf(f, "%f ", fpr[i]);
+//            }
+//            fprintf(f, "\n");
+//            fclose(f);
 
             std::string str3 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";
             f = fopen(str3.c_str(),"w");
