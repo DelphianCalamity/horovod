@@ -514,7 +514,7 @@ class Context_Aware_Bloom_Filter_Compressor(Compressor):
 
         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
         library = load_library.load_op_library(filename)
-        bloom_decompressor = library.context_aware_bloom_decompressor
+        bloom_decompressor = library.bloom_decompressor
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
                                                  tf.train.get_or_create_global_step(),
