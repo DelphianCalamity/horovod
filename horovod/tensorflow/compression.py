@@ -33,18 +33,20 @@ class Compressor(object):
         gamma = params['gamma']
         if use_memory:
             name = tensor.name
-            if name in cls.residuals:
-                tensor = beta * cls.residuals[name] + gamma * tensor
+            cls.residuals[tensor.name] = tf.Variable(tf.zeros_like(tensor), trainable=False)
+            tensor = beta * cls.residuals[name] + gamma * tensor
         return tensor
 
     @classmethod
-    def memory_update(cls, tensor, tensor_compressed, ctx, params):
+    def memory_update(cls, tensor, tensor_compensate, tensor_compressed, ctx, params):
         """Update the residuals."""
         use_memory = params['use_memory']
         if use_memory:
             name = tensor.name
             tensor_decompressed = cls.decompress(tensor_compressed, ctx, params)
-            cls.residuals[name] = tensor - tensor_decompressed
+            delta = tensor_compensate - tensor_decompressed
+            memory_update_op = cls.residuals[name].assign(delta)
+        return [memory_update_op] if use_memory else []
 
     @staticmethod
     def aggregate(tensors, params):
@@ -160,6 +162,7 @@ class TopKCompressor(Compressor):
                 integer_compressor = library.integer_compressor
                 
                 values = tf.bitcast(values, tf.int32)
+                values_shape = tf.shape(values)
                 indices = tf.bitcast(indices, tf.uint32)
                 # indices = tf.Print(indices, [indices], "Compress Indices:")
                 compressed_indices = integer_compressor(indices,
@@ -207,6 +210,9 @@ class TopKCompressor(Compressor):
                                                       verbosity=params['verbosity'])
         else:
             compressed_indices = indices
+            values = tf.bitcast(values, tf.int32)
+            params['values_size'] = k
+            values_shape = tf.shape(values)
 
         tensor_compressed = tf.concat([values, compressed_indices], 0)
         ctx = [tensor_shape, values_shape]
@@ -220,10 +226,10 @@ class TopKCompressor(Compressor):
         compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
 
         values, indices = tf.split(tensor_compressed, [params['values_size'], compressed_tensor_size-params['values_size']])
-        print("\n\nShape Uint flatten\n\n:", values.shape)
+        # print("\n\nShape Uint flatten\n\n:", values.shape)
 
         values = tf.reshape(values, ctx[1])
-        print("\n\nShape Uint8 unflatten\n\n:", values.shape)
+        # print("\n\nShape Uint8 unflatten\n\n:", values.shape)
         values = tf.bitcast(values, tf.float32)
 
         tensor_shape = ctx[0]

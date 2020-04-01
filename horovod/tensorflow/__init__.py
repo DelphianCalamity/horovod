@@ -227,12 +227,11 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
             communicate['allgather'] = Allgather
             communicate['broadcast'] = Broadcast
 
-            tensor = compression.memory_compensate(tensor, params)
-
+            tensor_compensate = compression.memory_compensate(tensor, params)
             # with tf.device(params['compression_device']):
             tensor_compressed, ctx = compression.compress(tensor, params)
 
-            compression.memory_update(tensor, tensor_compressed, ctx, params)
+            memory_update_op = compression.memory_update(tensor, tensor_compensate, tensor_compressed, ctx, params)
 
             if comm_method == 'allreduce':
                 summed_tensor_compressed = Allreduce(tensor_compressed)
@@ -258,6 +257,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                         compression.decompress(tensor_compressed, ctx, params))
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
+
+            for op in memory_update_op:
+                new_tensor = new_tensor + op - op
 
         return new_tensor
 

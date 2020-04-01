@@ -95,7 +95,7 @@ public:
         std::vector<int> values;
         std::vector<int> idxs;
 
-        // Query the universe and fix the values in order to avoid an erroneous reconstruction
+        // Query the universe and modify the values in order to avoid an erroneous reconstruction
         int false_positives = 0;
         for (int i=0,j=0; i<initial_tensor_flat.size() && j<K; ++i) {
             if (bloom.Query(i)) {
@@ -149,7 +149,7 @@ public:
             CompressionUtilities::print_vector(idxs.data(), K, f);
 
             fprintf(f, "FalsePositives: %d\n", false_positives);
-            fprintf(f, "Total: %d\n", K);
+            fprintf(f, "Total: %d\n", N);
             fprintf(f, "\n\n########################################################################################\n\n");
             fclose(f);
 
