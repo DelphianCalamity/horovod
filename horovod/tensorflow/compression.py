@@ -1249,9 +1249,8 @@ class INCEPTIONNCompressor(Compressor):
         indices_16bit = tf.reshape(tf.where(mask_16bit), [-1])
         indices_8bit = tf.reshape(tf.where(mask_8bit), [-1])
 
-        edges_16bit = tf.constant([0, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536],
-                                  dtype=tf.int32)
-        edges_8bit = tf.constant([0, 2, 4, 8, 16, 32, 64, 128, 256], dtype=tf.int32)
+        edges_16bit = [0, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536]
+        edges_8bit = [0, 2, 4, 8, 16, 32, 64, 128, 256]
         import tensorflow_probability as tfp
 
         # 16bit decompress
@@ -1261,8 +1260,22 @@ class INCEPTIONNCompressor(Compressor):
         s_16bit = tf.bitwise.left_shift(s_16bit, 16)
         v_16bit = tf.bitwise.left_shift(v_16bit, 1)
 
+        # 8bit decompress
+        # get the sign bit s_8bit and remove MSB from v_8bit
+        s_8bit = tf.bitwise.bitwise_and(v_8bit, 0b10000000)
+        s_8bit = tf.cast(s_8bit, dtype=tf.int32)
+        s_8bit = tf.bitwise.left_shift(s_8bit, 24)
+        v_8bit = tf.bitwise.left_shift(v_8bit, 1)
+
         # find the marker bit in v_16bit and get the exponent
-        n_shift = 16 - tfp.stats.find_bins(tf.cast(v_16bit, dtype=tf.int32), edges_16bit)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.int32), trainable=False)
+        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.int32))
+        with tf.control_dependencies([op]):
+            temp = tf.scatter_update(zero_tensor, indices_16bit, tf.cast(v_16bit, tf.int32))
+            temp = tf.scatter_update(temp, indices_8bit, tf.cast(v_8bit, tf.int32))
+            n_shift_all = tfp.stats.find_bins(tf.cast(temp, dtype=tf.int32), edges_16bit)
+
+        n_shift = 16 - tf.gather(n_shift_all, indices_16bit)
         e_16bit = 127 - (n_shift - 1)
         e_16bit = tf.bitwise.left_shift(e_16bit, 23)
 
@@ -1277,15 +1290,15 @@ class INCEPTIONNCompressor(Compressor):
         v_16bit = tf.bitwise.bitwise_or(temp, m_16bit)
         v_16bit = tf.bitcast(v_16bit, tf.float32)
 
-        # 8bit decompress
-        # get the sign bit s_8bit and remove MSB from v_8bit
-        s_8bit = tf.bitwise.bitwise_and(v_8bit, 0b10000000)
-        s_8bit = tf.cast(s_8bit, dtype=tf.int32)
-        s_8bit = tf.bitwise.left_shift(s_8bit, 24)
-        v_8bit = tf.bitwise.left_shift(v_8bit, 1)
 
         # find the marker bit in v_8bit and get the exponent
-        n_shift = 8 - tfp.stats.find_bins(tf.cast(v_8bit, dtype=tf.int32), edges_8bit)
+
+        # zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=v_8bit.dtype), trainable=False)
+        # op = zero_tensor.assign(tf.zeros([tensor_size], dtype=v_8bit.dtype))
+        # with tf.control_dependencies([op]):
+        #     temp = tf.scatter_update(zero_tensor, indices_8bit, v_8bit)
+        # n_shift = 8 - tfp.stats.find_bins(tf.cast(temp, dtype=tf.int32), edges_8bit)
+        n_shift = 8 - tf.gather(n_shift_all, indices_8bit)
         e_8bit = 127 - (n_shift - 1)
         e_8bit = tf.bitwise.left_shift(e_8bit, 23)
 
