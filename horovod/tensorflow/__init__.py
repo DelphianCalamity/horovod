@@ -63,26 +63,33 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     the represented tensor.
     """
 
-    if compression is None:
-        params = {
-            "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
-            "comm_method": os.environ.get('HOROVOD_COMM_METHOD', 'allreduce'),
-            "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
-            "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
-            "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
-            "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
-            "gradient_clipping": strtobool(os.environ.get('HOROVOD_GRADIENT_CLIPPING', "False")),
-            "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
-            "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
-            "debug": strtobool(os.environ.get('HOROVOD_DEBUG', "False")),
-            "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
-            "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
-            'model_name': os.environ.get('HOROVOD_MODEL_NAME', 'resnet20_v2'),
-            'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True')),
-            'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
-            'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2)),
-            'error_bound': float(os.environ.get('HOROVOD_ERROR_BOUND', 2e-10)),  # typical values: 2e-10, 2e-8, 2e-6
-        }
+    params_env = {
+        "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
+        "comm_method": os.environ.get('HOROVOD_COMM_METHOD', 'allreduce'),
+        "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
+        "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
+        "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
+        "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
+        "gradient_clipping": strtobool(os.environ.get('HOROVOD_GRADIENT_CLIPPING', "False")),
+        "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
+        "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
+        "debug": strtobool(os.environ.get('HOROVOD_DEBUG', "False")),
+        "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
+        "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
+        'model_name': os.environ.get('HOROVOD_MODEL_NAME', 'resnet20_v2'),
+        'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True')),
+        'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
+        'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2)),
+        'error_bound': float(os.environ.get('HOROVOD_ERROR_BOUND', 2e-10)),  # typical values: 2e-10, 2e-8, 2e-6
+    }
+    if params is not None:
+        for argument in params_env:
+            if argument not in params:
+                params[argument] = params_env[argument]
+    else:
+        params = params_env
+
+
 
 
     comp_dict = {}
@@ -153,8 +160,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
 
-    #print("========================== print params ====================================")
-    #print(params)
+    # print("========================== print params ====================================")
+    # print(params)
     if isinstance(tensor, tf.IndexedSlices):
         print("=====this model contains sparse gradient")
         with tf.device(device_sparse):
@@ -200,9 +207,12 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 new_tensors = defaultdict(list)
                 num = len(tensors)
                 for i in range(len(tensors)):
-                    tensors_size.append(tf.reshape(tf.size(tensors[i]), [-1]))
-                    tensors_shape[i] = tf.shape(tensors[i])
-                    tensors_1d[i] = tf.reshape(tensors[i], [-1])
+                    # tensors_size.append(tf.reshape(tf.size(tensors[i]), [-1]))
+                    # tensors_shape[i] = tf.shape(tensors[i])
+                    # tensors_1d[i] = tf.reshape(tensors[i], [-1])
+                    tensors_size.append(tf.reshape(tf.shape(tensors[i])[0], [-1]))
+                    # tensors_shape[i] = tf.shape(tensors[i])
+                    tensors_1d[i] = tensors[i]
                     #print tensor size
                     if params['debug']:
                         tensors_1d[i] = tf.Print(tensors_1d[i], [tf.size(tensors_1d[i])],
@@ -226,7 +236,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                     tensors_size = tensors_size_ag[num * ranki:num * (ranki+1)]
                     for i in range(len(tensors)):
                         index_b[i] = index_a[i] + tensors_size[i]
-                        new_tensors[ranki].append(tf.reshape(tensors_ag[i][index_a[i]:index_b[i]], tensors_shape[i]))
+                        # new_tensors[ranki].append(tf.reshape(tensors_ag[i][index_a[i]:index_b[i]], tensors_shape[i]))
+                        new_tensors[ranki].append(tensors_ag[i][index_a[i]:index_b[i]])
                         index_a[i] = index_b[i]
                 return new_tensors
 
