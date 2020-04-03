@@ -230,7 +230,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
             tensor_compensate = compression.memory_compensate(tensor, params)
             # with tf.device(params['compression_device']):
             tensor_compressed, ctx = compression.compress(tensor_compensate, params)
-
+            params['suffix'] = 4
             memory_update_op = compression.memory_update(tensor, tensor_compensate, tensor_compressed, ctx, params)
 
             if comm_method == 'allreduce':
