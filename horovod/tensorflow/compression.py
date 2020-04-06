@@ -368,6 +368,7 @@ class Bloom_Filter_Compressor(Compressor):
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
         return decompressed_tensor
 
+
 class Bloom_Filter_Compressor_Conflict_Sets(Compressor):
     """"""
 
@@ -418,11 +419,11 @@ class Bloom_Filter_Compressor_Conflict_Sets(Compressor):
 
         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
         library = load_library.load_op_library(filename)
-        bloom_compressor = library.bloom_compressor
+        bloom_compressor = library.bloom_compressor_conflict_sets
 
         # For debugging
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
-        compressed_tensor = bloom_compressor_conflict_sets(values, indices,
+        compressed_tensor = bloom_compressor(values, indices,
                                              log_initial_tensor,
                                              tf.train.get_or_create_global_step(),
                                              hash_num=params['k'],
@@ -443,9 +444,9 @@ class Bloom_Filter_Compressor_Conflict_Sets(Compressor):
 
         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
         library = load_library.load_op_library(filename)
-        bloom_decompressor = library.bloom_decompressor
+        bloom_decompressor = library.bloom_decompressor_conflict_sets
 
-        decompressed_tensor = bloom_decompressor_conflict_sets(compressed_tensor, tensor_size,
+        decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
                                                  tf.train.get_or_create_global_step(), params['topk'],
                                                  hash_num=params['k'],
                                                  bloom_size=params['m'],
