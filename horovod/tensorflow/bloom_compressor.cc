@@ -140,6 +140,24 @@ public:
             const Tensor &initial_tensor = context->input(2);
             auto initial_flat = initial_tensor.flat<int>();
 
+            // Selected-indices contains the indices that will be selected from the decompressor
+            // examine how many of those are false
+            std::vector<int> selected_indices;
+            int N = initial_flat.size();
+            int K = values_size;
+            for (int i=0; i<N; i++) {
+                if (bloom.Query(i)) {  // If it is positive
+                    selected_indices.push_back(i);
+                }
+            }
+            int policy_errors = 0;
+            for (int i=0; i<K; i++) {
+                int chosen_index = selected_indices[i];
+                if (!find(indices, chosen_index)) {
+                    policy_errors++;
+                }
+            }
+
             // Compute False Positives
             int false_positives = 0;
             for (int i=0; i<initial_flat.size(); ++i) {
@@ -176,6 +194,11 @@ public:
             std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/fpr_" + suffix + ".txt";
             f = fopen(str1.c_str(),"w");
             fprintf(f, "FalsePositives: %d  Total: %d\n", false_positives,  initial_flat.size());
+            fclose(f);
+
+            std::string str4 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/policy_errors_" + suffix + ".txt";
+            f = fopen(str4.c_str(),"w");
+            fprintf(f, "PolicyErrors: %d  Total: %d\n", policy_errors,  K);
             fclose(f);
 
             std::string str3 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";

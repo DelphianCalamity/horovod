@@ -105,7 +105,6 @@ public:
             auto initial_flat = initial_tensor.flat<int>();
 
     /*******************************************************************************************/
-            // Compute False Positives
             int N = initial_flat.size();
             int K = values_size;
             std::unordered_map<string, std::vector<int>> conflict_sets;
@@ -158,7 +157,6 @@ public:
 //             }
 //             std::cout << std::endl;
 
-    /*******************************************************************************************/
             // Selected-indices contains the indices that will be selected from the decompressor
             // examine how many of those are false
             int policy_errors = 0;
@@ -168,6 +166,7 @@ public:
                     policy_errors++;
                 }
             }
+    /*******************************************************************************************/
 
             // Compute number of false positives
             int false_positives = 0;
