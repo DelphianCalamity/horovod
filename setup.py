@@ -868,6 +868,8 @@ def build_tf_extension(build_ext, global_options):
                                  ['horovod/tensorflow/mpi_ops.cc'] + \
                                  ['horovod/tensorflow/bloom_compressor.cc'] + \
                                  ['horovod/tensorflow/bloom_decompressor.cc'] + \
+                                 ['horovod/tensorflow/bloom_compressor_conflict_sets.cc'] + \
+                                 ['horovod/tensorflow/bloom_decompressor_conflict_sets.cc'] + \
                                  ['horovod/tensorflow/bloom_adaptive_compressor.cc'] + \
                                  ['horovod/tensorflow/bloom_adaptive_decompressor.cc'] + \
                                  ['horovod/tensorflow/context_aware_bloom_compressor.cc'] + \

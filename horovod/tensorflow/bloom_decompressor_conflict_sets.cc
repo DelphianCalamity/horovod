@@ -10,10 +10,11 @@
 #include "./compression_utils.hpp"
 
 #include <string>
+#include<cstdlib>
 
 using namespace tensorflow;
 
-REGISTER_OP("BloomDecompressor")
+REGISTER_OP("BloomDecompressorConflictSets")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
 .Attr("logfile_suffix: int")            // For debugging
@@ -25,35 +26,13 @@ REGISTER_OP("BloomDecompressor")
 .Input("step: int64")                   // For debugging
 .Input("k: int32")
 .Output("decompressed_tensor: int32")
-/*
-//Todo: Fix the segfault error below to enable shape inference
-// https://github.com/tensorflow/tensorflow/issues/31335
-//  https://github.com/tensorflow/tensorflow/issues/30494
-
-/// .SetShapeFn([](shape_inference::InferenceContext* c) {
-//   return shape_inference::ConcatV2Shape(c);
-//   return shape_inference::ConcatShape(c, c->num_inputs()-1);
-// })
-*/
-.Doc(R"doc(
-        Receives a compressed tensor which is a concatenation of values and bloom filter,
-        splits it to those two tensors using the bloom_size info and uses both of them
-         to re-construct the initial tensor. Also receives the decompressed tensor's size.
-        Arguments
-            compressed_tensor: concatenation of values and bloom filter
-        Output
-            decompressed_tensor: values decoded
-    )doc");
+.Doc(R"doc()doc");
 
 
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
     size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-//            bloom::FnvHash32 h;
-//            h.Update(s.b);      // casting uint8_t to int
-//            h.Update(s.a);
-//            return h.Digest();
     uint32_t out;
     bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
     return out;
@@ -62,11 +41,11 @@ namespace std {
 }
 
 
-class BloomDecompressorOp : public OpKernel {
+class BloomDecompressorConflictSetsOp : public OpKernel {
 
 public:
 
-    explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+    explicit BloomDecompressorConflictSetsOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &h));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &m));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
@@ -86,26 +65,11 @@ public:
 
         bloom_size = m;
         hash_num = h;
-/*
-        int step_n = context->input(2).flat<int64>()(0);
-        int k = context->input(3).flat<int32>()(0);
-
-        if (step_n < 8000) {
-            float fpr = 0.00001;
-            bloom_size = (k * abs(log(fpr))) / (pow(log(2), 2));
-            int quot = int(bloom_size/8);
-            int rem = bloom_size % 8;
-            bloom_size = quot;
-            if (rem != 0)
-                bloom_size += 1;
-            float h = (bloom_size*8 / k) * log(2);
-            hash_num = int(ceil(h));
-            assert(hash_num > 0);
-        }
-*/
 
         int values_size = (compressed_tensor_flat.size()-bloom_size)/sizeof(int);
         int decompressed_size = *decompressed_size_flat.data();
+        int N = decompressed_size;
+        int K = values_size;
 
         // Reconstruct the bloom filter
         const int8 *ptr = compressed_tensor_flat.data();           // Note: int8 is 1 byte
@@ -121,19 +85,66 @@ public:
         Tensor *decompressed_tensor = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, decompressed_tensor_shape, &decompressed_tensor));
         auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
+        memset(decompressed_tensor_flat.data(), 0, decompressed_size*sizeof(int));
 
-        // Decode the compressed tensor
-        int i,j;
-        for (i=0,j=0; j<values_size; ++i) {
-            if (bloom_filter.Query(i)) {
-                decompressed_tensor_flat(i) = values_vec[j];
-                j++;
-            } else {
-                decompressed_tensor_flat(i) = 0;
+
+    /*******************************************************************************************/
+        // use a hashmap <hash_string, vector<int>>
+        std::unordered_map<string, std::vector<int>> conflict_sets;
+
+        // Iterating over the universe and collecting the conflict sets
+        for (int i=0; i<N; i++) {
+            if (bloom_filter.Query(i)) {  // If it is positive
+                string hash_string = bloom_filter.Hash(i);
+//                std::cout << "hash_string: " << hash_string << std::endl;
+                conflict_sets[hash_string].push_back(i);
             }
         }
-        for (; i<decompressed_size; ++i) {
-            decompressed_tensor_flat(i) = 0;
+
+//        for (auto& it: conflict_sets) {
+//            std::cout << "Key: " << it.first << ", Values: " << std::endl;
+//             for (auto& itt : it.second)
+//                std::cout << itt << " ,";
+//             std::cout << std::endl;
+//        }
+
+        srand(4);
+
+        int random, idx, left = K;
+        std::vector<int> selected_indices;
+        while (left > 0) {                          // Don't stop until you have selected K positives
+            for (auto& cset: conflict_sets) {       // Choose a positive out of every conflict set - remove it from set
+                if (left == 0)
+                    break;
+                random = rand() % cset.second.size();    // choose randomly an element from the set
+//                std::cout << "Random:" << random << std::endl;
+                idx = cset.second[random];
+//                std::cout << "Index:" << idx << std::endl;
+                cset.second.erase(cset.second.begin()+random);
+               /*
+                std::cout << "Sets-left:  " << std::endl;;
+                for (auto& it: conflict_sets) {
+                   std::cout << "       Key: " << it.first << ", Values: ";
+                     for (auto& itt : it.second)
+                        std::cout << itt << ", ";
+                     std::cout << std::endl;
+                }
+                */
+                selected_indices.push_back(idx);
+                left--;
+            }
+        }
+        std::sort(selected_indices.begin(), selected_indices.end());
+
+//         for (auto& it : selected_indices) {
+//            std::cout << it << ", ";
+//         }
+//         std::cout << std::endl;
+
+    /*******************************************************************************************/
+        // Map values to the selected indices
+        for (int i=0; i<K; i++) {
+            decompressed_tensor_flat(selected_indices[i]) = values_vec[i];
         }
 
         // *********************** For Debugging ********************** //
@@ -143,13 +154,15 @@ public:
             std::string str_suffix = std::to_string(logfile_suffix);
             std::string logs_suffix = std::to_string(logs_path_suffix);
             std::string str_step = std::to_string(step(0));
-            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + str_suffix + "/decompressor_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + str_suffix + "/decompressor_conflict_sets_logs_" + str_suffix + "_" + std::to_string(suffix) + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             if (f==NULL)
                 perror ("Can't open file");
             fprintf(f, "decompressed size: %d\n\n", decompressed_size);
             fprintf(f, "Bloom size: = %d\n", bloom_size);
             bloom_filter.fprint(f);
+            fprintf(f, "\nIndices Chosen:");
+            CompressionUtilities::print_vector(selected_indices.data(), K, f);
             fprintf(f, "Values Vector:"); CompressionUtilities::print_vector(values_vec, values_size, f);
             fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(decompressed_tensor_flat.size()).c_str());
             fprintf(f, "########################################################################################\n\n");
@@ -172,10 +185,4 @@ private:
 };
 
 
-REGISTER_KERNEL_BUILDER(Name("BloomDecompressor").Device(DEVICE_CPU), BloomDecompressorOp);
-
-//ToDo: GPU implementation
-
-// #if HOROVOD_GPU_ALLREDUCE
-// REGISTER_KERNEL_BUILDER(Name("BloomDecompressor").Device(DEVICE_GPU),BloomDecompressorOp);
-// #endif
+REGISTER_KERNEL_BUILDER(Name("BloomDecompressorConflictSets").Device(DEVICE_CPU), BloomDecompressorConflictSetsOp);

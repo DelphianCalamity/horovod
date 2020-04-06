@@ -145,7 +145,7 @@ public:
             fprintf(f, "Values:");
             CompressionUtilities::print_vector(values.data(), K, f);
             fprintf(f, "value_errors: %d\n\n", value_errors);
-            fprintf(f, "\nIndices After:");
+            fprintf(f, "\nIndices Chosen:");
             CompressionUtilities::print_vector(idxs.data(), K, f);
 
             fprintf(f, "FalsePositives: %d\n", false_positives);

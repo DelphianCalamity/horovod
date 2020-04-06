@@ -15,7 +15,7 @@
 
 using namespace tensorflow;
 
-REGISTER_OP("BloomCompressor")
+REGISTER_OP("BloomCompressorConflictSets")
 .Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
@@ -27,34 +27,13 @@ REGISTER_OP("BloomCompressor")
 .Input("initial_tensor: int32")    // For debugging
 .Input("step: int64")              // For debugging
 .Output("compressed_tensor: int8")
-
-//Todo: Fix the segfault error below to enable shape inference
-// https://github.com/tensorflow/tensorflow/issues/31335
-//  https://github.com/tensorflow/tensorflow/issues/30494
-
-/// .SetShapeFn([](shape_inference::InferenceContext* c) {
-//   return shape_inference::ConcatV2Shape(c);
-//   return shape_inference::ConcatShape(c, c->num_inputs()-1);
-// })
-.Doc(R"doc(
-        Receives 'values' and 'indices' as inputs and builds a bloom filter on the indices.
-        Returns a tensor wich is the concatenation of the values and the bloom filter
-        Arguments
-            values: a tensor of values to concatenate with bloom filter
-            indices: a tensor of indices for building the bloom filter
-        Output
-            compressed_tensor: a concatenation of the values and the bloom filter
-    )doc");
+.Doc(R"doc()doc");
 
 
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
     size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-//            bloom::FnvHash32 h;
-//            h.Update(s.b);      // casting uint8_t to int
-//            h.Update(s.a);
-//            return h.Digest();
     uint32_t out;
     bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
     return out;
@@ -62,11 +41,11 @@ namespace std {
 };
 }
 
-class BloomCompressorOp : public OpKernel {
+class BloomCompressorConflictSetsOp : public OpKernel {
 
 public:
 
-    explicit BloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+    explicit BloomCompressorConflictSetsOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &h));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &m));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
@@ -94,22 +73,7 @@ public:
 
         bloom_size = m;
         hash_num = h;
-/*
-        int step_n = context->input(3).flat<int64>()(0);
-        if (step_n < 8000) {
-            int k=values_size;
-            float fpr = 0.00001;
-            bloom_size = (k * abs(log(fpr))) / (pow(log(2), 2));
-            int quot = int(bloom_size/8);
-            int rem = bloom_size % 8;
-            bloom_size = quot;
-            if (rem != 0)
-                bloom_size += 1;
-            float h = (bloom_size*8 / k) * log(2);
-            hash_num = int(ceil(h));
-            assert(hash_num > 0);
-        }
-*/
+
         int output_concat_dim = values_size*sizeof(int) + bloom_size;
 
         // Building Bloom Filter
@@ -140,7 +104,72 @@ public:
             const Tensor &initial_tensor = context->input(2);
             auto initial_flat = initial_tensor.flat<int>();
 
+    /*******************************************************************************************/
             // Compute False Positives
+            int N = initial_flat.size();
+            int K = values_size;
+            std::unordered_map<string, std::vector<int>> conflict_sets;
+
+            // Iterating over the universe and collecting the conflict sets
+            for (int i=0; i<N; i++) {
+                if (bloom.Query(i)) {  // If it is positive
+                    string hash_string = bloom.Hash(i);
+//                    std::cout << "hash_string: " << hash_string << std::endl;
+                    conflict_sets[hash_string].push_back(i);
+                }
+            }
+//            for (auto& it: conflict_sets) {
+//                std::cout << "Key: " << it.first << ", Values: " << std::endl;
+//                 for (auto& itt : it.second)
+//                    std::cout << itt << " ,";
+//                 std::cout << std::endl;
+//            }
+
+            srand(4);
+
+            int random, idx, left = K;
+            std::vector<int> selected_indices;
+            while (left > 0) {                          // Don't stop until you have selected K positives
+                for (auto& cset: conflict_sets) {       // Choose a positive out of every conflict set - remove it from set
+                    if (left == 0)
+                        break;
+                    random = rand() % cset.second.size();    // choose randomly an element from the set
+//                    std::cout << "Random:" << random << std::endl;
+                    idx = cset.second[random];
+//                    std::cout << "Index:" << idx << std::endl;
+                    cset.second.erase(cset.second.begin()+random);
+                   /*
+                    std::cout << "Sets-left:  " << std::endl;;
+                    for (auto& it: conflict_sets) {
+                       std::cout << "       Key: " << it.first << ", Values: ";
+                         for (auto& itt : it.second)
+                            std::cout << itt << ", ";
+                         std::cout << std::endl;
+                    }
+                    */
+                    selected_indices.push_back(idx);
+                    left--;
+                }
+            }
+            std::sort(selected_indices.begin(), selected_indices.end());
+
+//             for (auto& it : selected_indices) {
+//                std::cout << it << ", ";
+//             }
+//             std::cout << std::endl;
+
+    /*******************************************************************************************/
+            // Selected-indices contains the indices that will be selected from the decompressor
+            // examine how many of those are false
+            int policy_errors = 0;
+            for (int i=0; i<K; i++) {
+                int chosen_index = selected_indices[i];
+                if (!find(indices, chosen_index)) {
+                    policy_errors++;
+                }
+            }
+
+            // Compute number of false positives
             int false_positives = 0;
             for (int i=0; i<initial_flat.size(); ++i) {
                 if (bloom.Query(i) && !find(indices, i)) {
@@ -157,7 +186,7 @@ public:
             if(systemRet == -1){
                 perror("mkdir failed");
             }
-            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/compressor_logs_" + suffix + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/compressor_conflict_sets_logs_" + suffix + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             if (f==NULL) {
                 perror ("Can't open file");
@@ -176,6 +205,11 @@ public:
             std::string str1 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/fpr_" + suffix + ".txt";
             f = fopen(str1.c_str(),"w");
             fprintf(f, "FalsePositives: %d  Total: %d\n", false_positives,  initial_flat.size());
+            fclose(f);
+
+            std::string str4 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/policy_errors_" + suffix + ".txt";
+            f = fopen(str4.c_str(),"w");
+            fprintf(f, "PolicyErrors: %d  Total: %d\n", policy_errors,  K);
             fclose(f);
 
             std::string str3 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stats" + suffix + ".txt";
@@ -210,10 +244,4 @@ private:
 };
 
 
-REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_CPU), BloomCompressorOp);
-
-//ToDo: GPU implementation
-
-// #if HOROVOD_GPU_ALLREDUCE
-// REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_GPU),BloomCompressorOp);
-// #endif
+REGISTER_KERNEL_BUILDER(Name("BloomCompressorConflictSets").Device(DEVICE_CPU), BloomCompressorConflictSetsOp);

@@ -87,10 +87,13 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     comp_dict["bloom"] = Compression.bloom
     comp_dict["bloom_adaptive"] = Compression.bloom_adaptive
     comp_dict["context_aware_bloom"] = Compression.context_aware_bloom
+    comp_dict["bloom_conflict_sets"] = Compression.bloom_conflict_sets
+
     # testing
     if params['compress_state'] == False:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
-                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch', 'bloom', 'bloom_adaptive', 'context_aware_bloom']:
+                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch',
+                       'bloom', 'bloom_adaptive', 'context_aware_bloom', 'bloom_conflict_sets']:
             comp_dict[method] = Compression.fake
 
     default_params = {}
@@ -124,6 +127,24 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
             params[argument] = default_params[argument]
 
     params["compressor"] = comp_dict[params["compress_method"]]
+
+    #################################################
+    # tensor_flatten = tf.reshape(tensor, [-1])
+    # elemnum = tensor_flatten.get_shape().as_list()[0]
+    # compress_ratio = params["compress_ratio"]
+    # k = max(1, int(elemnum * compress_ratio))
+    # if k < 100:
+    #     compression = comp_dict["topk"]
+    # else:
+    #     compression = params["compressor"]
+
+    # if params['logfile_suffix'] < 25:
+    #     compression = comp_dict["topk"]
+    # else:
+    #     compression = params["compressor"]
+
+    #################################################
+
     comm_method = params["comm_method"]
     horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
     compression = params["compressor"]

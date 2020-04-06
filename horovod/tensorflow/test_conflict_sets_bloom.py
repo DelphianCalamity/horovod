@@ -14,8 +14,8 @@ with tf.Session() as sess:
 	print("Values Int: ", sess.run(values))
 values = tf.bitcast(values, tf.int32)
 
-bloom_compressor = tf.load_op_library('./bloom_compressor.so').bloom_compressor
-bloom_decompressor = tf.load_op_library('./bloom_decompressor.so').bloom_decompressor
+bloom_compressor = tf.load_op_library('./bloom_compressor_conflict_sets.so').bloom_compressor_conflict_sets
+bloom_decompressor = tf.load_op_library('./bloom_decompressor_conflict_sets.so').bloom_decompressor_conflict_sets
 
 # bloom size is given in bytes, so for a bloom of 8 bits set bloom_size to 1
 # bloom_size = 1
@@ -32,6 +32,8 @@ if rem != 0:
 h = (bloom_size * 8 / k) * math.log(2)
 hash_num = int(math.ceil(h))
 
+bloom_size=1
+hash_num=8
 print("BLOOM:", bloom_size)
 print("HASHNUM:", hash_num)
 
@@ -62,4 +64,4 @@ with tf.Session() as sess:
 
 	# sess.run(compressed_tensor, feed_dict={step:0})
 	# print("Compressed Tensor Shape: ", compressed_tensor.get_shape())
-	sess.run(decompressed_tensor, feed_dict={step:1100})
+	sess.run(decompressed_tensor, feed_dict={step:1})
