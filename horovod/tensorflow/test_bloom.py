@@ -47,7 +47,7 @@ compressed_tensor = bloom_compressor(values, indices,
 									 logs_path_suffix=1,
 									 verbosity=1)
 
-decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, step, 3,
+decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, step, k,
 										 hash_num=hash_num,
 										 bloom_size=bloom_size,
 										 logfile_suffix=1,

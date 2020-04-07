@@ -14,7 +14,7 @@
 
 using namespace tensorflow;
 
-REGISTER_OP("ContextAwareBloomCompressor")
+REGISTER_OP("FpAwareBloomCompressorConflictSets")
 .Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
@@ -38,11 +38,11 @@ namespace std {
 };
 }
 
-class ContextAwareBloomCompressorOp : public OpKernel {
+class FpAwareBloomCompressorConflictSetsOp : public OpKernel {
 
 public:
 
-    explicit ContextAwareBloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+    explicit FpAwareBloomCompressorConflictSetsOp(OpKernelConstruction *context) : OpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
@@ -66,12 +66,11 @@ public:
         // Retrieving Inputs
         const Tensor &initial_tensor = context->input(0);  auto initial_tensor_flat = initial_tensor.flat<int>();
         const Tensor &indices = context->input(1);  auto indices_flat = indices.flat<int>();
+        const Tensor &step_tensor = context->input(2);
+        auto step = step_tensor.flat<int64>();
+
         int N = initial_tensor_flat.size();
         int K = indices_flat.size();
-
-//        std::cout << "N: " << N << std::endl;
-//        std::cout << "K: " << K << std::endl;
-
         int output_concat_dim =  K*sizeof(int) + bloom_size;
 
         // Building Bloom Filter
@@ -79,7 +78,6 @@ public:
         for (int i=0; i<K; ++i) {
             bloom.Insert(indices_flat(i));
         }
-//        bloom.print();
 
         // Create an output tensor
         TensorShape output_shape;
@@ -92,32 +90,62 @@ public:
         std::vector<unsigned char> &bloom_vec = bloom.Get_bloom();
         std::copy(bloom_vec.begin(), bloom_vec.end(), out_ptr+K*sizeof(int));
 
-        std::vector<int> values;
-        std::vector<int> idxs;
 
-        // Query the universe and modify the values in order to avoid an erroneous reconstruction
-        int false_positives = 0;
-        for (int i=0,j=0; i<initial_tensor_flat.size() && j<K; ++i) {
-            if (bloom.Query(i)) {
-                if (!find(indices, i)) {
-                    false_positives++;
-                }
-                values.push_back(initial_tensor_flat(i));
-                idxs.push_back(i);
-                j++;
+   /*******************************************************************************************/
+    // Select Indices
+        std::unordered_map<string, std::vector<int>> conflict_sets;
+
+        // Iterating over the universe and collecting the conflict sets
+        for (int i=0; i<N; i++) {
+            if (bloom.Query(i)) {  // If it is positive
+                string hash_string = bloom.Hash(i);
+                conflict_sets[hash_string].push_back(i);
             }
+        }
+
+        srand(step(0));
+
+        int random, idx, left = K;
+        std::vector<int> selected_indices;
+        while (left > 0) {                          // Don't stop until you have selected K positives
+            for (auto& cset: conflict_sets) {       // Choose a positive out of every conflict set - remove it from set
+                if (left == 0)
+                    break;
+                random = rand() % cset.second.size();    // choose randomly an element from the set
+                idx = cset.second[random];
+                cset.second.erase(cset.second.begin()+random);
+                selected_indices.push_back(idx);
+                left--;
+            }
+        }
+        std::sort(selected_indices.begin(), selected_indices.end());
+
+        // Selected-indices contains the indices that will be selected from the decompressor examine how many of those are false
+        int policy_errors = 0;
+        for (int i=0; i<K; i++) {
+            int chosen_index = selected_indices[i];
+            if (!find(indices, chosen_index)) {
+                policy_errors++;
+            }
+        }
+    /*******************************************************************************************/
+
+        // FP_aware compressor: for every selected index select to send its value
+        std::vector<int> values;
+        for (int i=0; i<K; i++) {
+            int chosen_index = selected_indices[i];
+            values.push_back(initial_tensor_flat(chosen_index));
         }
         memcpy(out_ptr, values.data(), K*sizeof(int));
 
         // *********************** For Debugging ********************** //
-        const Tensor &step_tensor = context->input(2);
-        auto step = step_tensor.flat<int64>();
-
         if (verbosity != 0 && step(0) % verbosity == 0 ) {
-            int value_errors=0;
-            for (int i=0; i<K; i++) {
-            if (find(indices, idxs[i]) == 0) {
-                    value_errors++;
+
+            // Compute number of false positives
+            int false_positives = 0;
+            for (int i=0; i<N; ++i) {
+                if (bloom.Query(i) && !find(indices, i)) {
+                    false_positives++;
                 }
             }
 
@@ -130,7 +158,7 @@ public:
             if(systemRet == -1){
                 perror("mkdir failed");
             }
-            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/context_aware_compressor_logs_" + suffix + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/FP_aware_compressor_conflict_sets_logs_" + suffix + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             if (f==NULL) {
                 perror ("Can't open file");
@@ -144,9 +172,9 @@ public:
 
             fprintf(f, "Values:");
             CompressionUtilities::print_vector(values.data(), K, f);
-            fprintf(f, "value_errors: %d\n\n", value_errors);
+            fprintf(f, "Policy errors: %d\n\n", policy_errors);
             fprintf(f, "\nIndices Chosen:");
-            CompressionUtilities::print_vector(idxs.data(), K, f);
+            CompressionUtilities::print_vector(selected_indices.data(), K, f);
 
             fprintf(f, "FalsePositives: %d\n", false_positives);
             fprintf(f, "Total: %d\n", N);
@@ -163,9 +191,9 @@ public:
             fprintf(f, "Initial_Size: %d  Final_Size: %d\n", N /*in bits*/,  bloom_size*8 /*in bits*/);
             fclose(f);
 
-            std::string str4 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/values_modified_" + suffix + ".txt";
+            std::string str4 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/policy_errors_" + suffix + ".txt";
             f = fopen(str4.c_str(),"w");
-            fprintf(f, "ValuesModified: %d  Total: %d\n", value_errors,  K);
+            fprintf(f, "PolicyErrors: %d  Total: %d\n", policy_errors,  K);
             fclose(f);
 
             std::string str2 = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/hashes_" + suffix + ".txt";
@@ -193,4 +221,4 @@ private:
 };
 
 
-REGISTER_KERNEL_BUILDER(Name("ContextAwareBloomCompressor").Device(DEVICE_CPU), ContextAwareBloomCompressorOp);
+REGISTER_KERNEL_BUILDER(Name("FpAwareBloomCompressorConflictSets").Device(DEVICE_CPU), FpAwareBloomCompressorConflictSetsOp);

@@ -24,35 +24,13 @@ REGISTER_OP("BloomDecompressor")
 .Input("decompressed_size: int32")
 .Input("step: int64")                   // For debugging
 .Output("decompressed_tensor: int32")
-/*
-//Todo: Fix the segfault error below to enable shape inference
-// https://github.com/tensorflow/tensorflow/issues/31335
-//  https://github.com/tensorflow/tensorflow/issues/30494
-
-/// .SetShapeFn([](shape_inference::InferenceContext* c) {
-//   return shape_inference::ConcatV2Shape(c);
-//   return shape_inference::ConcatShape(c, c->num_inputs()-1);
-// })
-*/
-.Doc(R"doc(
-        Receives a compressed tensor which is a concatenation of values and bloom filter,
-        splits it to those two tensors using the bloom_size info and uses both of them
-         to re-construct the initial tensor. Also receives the decompressed tensor's size.
-        Arguments
-            compressed_tensor: concatenation of values and bloom filter
-        Output
-            decompressed_tensor: values decoded
-    )doc");
+.Doc(R"doc()doc");
 
 
 namespace std {
     template<>
     struct hash<bloom::HashParams<uint32_t>> {
     size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-//            bloom::FnvHash32 h;
-//            h.Update(s.b);      // casting uint8_t to int
-//            h.Update(s.a);
-//            return h.Digest();
     uint32_t out;
     bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
     return out;
@@ -100,6 +78,25 @@ public:
         Tensor *decompressed_tensor = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, decompressed_tensor_shape, &decompressed_tensor));
         auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
+        memset(decompressed_tensor_flat.data(), 0, decompressed_size*sizeof(int));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         // Decode the compressed tensor
         int i,j;
@@ -150,9 +147,3 @@ private:
 
 
 REGISTER_KERNEL_BUILDER(Name("BloomDecompressor").Device(DEVICE_CPU), BloomDecompressorOp);
-
-//ToDo: GPU implementation
-
-// #if HOROVOD_GPU_ALLREDUCE
-// REGISTER_KERNEL_BUILDER(Name("BloomDecompressor").Device(DEVICE_GPU),BloomDecompressorOp);
-// #endif

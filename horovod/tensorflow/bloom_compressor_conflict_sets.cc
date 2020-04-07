@@ -124,7 +124,7 @@ public:
 //                 std::cout << std::endl;
 //            }
 
-            srand(4);
+            srand(step(0));
 
             int random, idx, left = K;
             std::vector<int> selected_indices;

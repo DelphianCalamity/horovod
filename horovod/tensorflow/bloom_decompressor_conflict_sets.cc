@@ -63,6 +63,9 @@ public:
         auto compressed_tensor_flat = compressed_tensor.flat<int8>();
         auto decompressed_size_flat = decompressed_size_tensor.flat<int>();
 
+        const Tensor &step_tensor = context->input(2);
+        auto step = step_tensor.flat<int64>();
+
         bloom_size = m;
         hash_num = h;
 
@@ -96,19 +99,10 @@ public:
         for (int i=0; i<N; i++) {
             if (bloom_filter.Query(i)) {  // If it is positive
                 string hash_string = bloom_filter.Hash(i);
-//                std::cout << "hash_string: " << hash_string << std::endl;
                 conflict_sets[hash_string].push_back(i);
             }
         }
-
-//        for (auto& it: conflict_sets) {
-//            std::cout << "Key: " << it.first << ", Values: " << std::endl;
-//             for (auto& itt : it.second)
-//                std::cout << itt << " ,";
-//             std::cout << std::endl;
-//        }
-
-        srand(4);
+        srand(step(0));
 
         int random, idx, left = K;
         std::vector<int> selected_indices;
@@ -117,29 +111,13 @@ public:
                 if (left == 0)
                     break;
                 random = rand() % cset.second.size();    // choose randomly an element from the set
-//                std::cout << "Random:" << random << std::endl;
                 idx = cset.second[random];
-//                std::cout << "Index:" << idx << std::endl;
                 cset.second.erase(cset.second.begin()+random);
-               /*
-                std::cout << "Sets-left:  " << std::endl;;
-                for (auto& it: conflict_sets) {
-                   std::cout << "       Key: " << it.first << ", Values: ";
-                     for (auto& itt : it.second)
-                        std::cout << itt << ", ";
-                     std::cout << std::endl;
-                }
-                */
                 selected_indices.push_back(idx);
                 left--;
             }
         }
         std::sort(selected_indices.begin(), selected_indices.end());
-
-//         for (auto& it : selected_indices) {
-//            std::cout << it << ", ";
-//         }
-//         std::cout << std::endl;
 
     /*******************************************************************************************/
         // Map values to the selected indices
@@ -148,8 +126,7 @@ public:
         }
 
         // *********************** For Debugging ********************** //
-        const Tensor &step_tensor = context->input(2);
-        auto step = step_tensor.flat<int64>();
+
         if (verbosity != 0 && step(0) % verbosity == 0 ) {
             std::string str_suffix = std::to_string(logfile_suffix);
             std::string logs_suffix = std::to_string(logs_path_suffix);
