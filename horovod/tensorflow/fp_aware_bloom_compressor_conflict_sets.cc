@@ -92,7 +92,7 @@ public:
 
 
    /*******************************************************************************************/
-    // Select Indices
+        // Select Indices
         std::unordered_map<string, std::vector<int>> conflict_sets;
 
         // Iterating over the universe and collecting the conflict sets
@@ -164,7 +164,6 @@ public:
                 perror ("Can't open file");
             }
             fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(N).c_str());
-//            fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
             fprintf(f, "Indices: %s\n\n", indices.DebugString(K).c_str());
             fprintf(f, "Bloom size: = %d\n", bloom_size);
             bloom.fprint(f);

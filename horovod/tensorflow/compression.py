@@ -538,7 +538,7 @@ class Bloom_Filter_Adaptive_Compressor(Compressor):
         return decompressed_tensor
 
 
-class Context_Aware_Bloom_Filter_Compressor(Compressor):
+class Fp_Aware_Bloom_Filter_Compressor(Compressor):
     """"""
 
     @staticmethod
@@ -586,7 +586,7 @@ class Context_Aware_Bloom_Filter_Compressor(Compressor):
 
         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
         library = load_library.load_op_library(filename)
-        bloom_compressor = library.context_aware_bloom_compressor
+        bloom_compressor = library.fp_aware_bloom_compressor
 
         # For debugging
         tensor_flatten = tf.bitcast(tensor_flatten, tf.int32)
@@ -1798,6 +1798,6 @@ class Compression(object):
     fake = FakeCompressor
     bloom = Bloom_Filter_Compressor
     bloom_adaptive = Bloom_Filter_Adaptive_Compressor
-    context_aware_bloom = Context_Aware_Bloom_Filter_Compressor
+    context_aware_bloom = Fp_Aware_Bloom_Filter_Compressor
     bloom_conflict_sets = Bloom_Filter_Compressor_Conflict_Sets
     fp_aware_bloom_conflict_sets = Fp_Aware_Bloom_Filter_Compressor_Conflict_sets

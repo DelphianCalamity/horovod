@@ -94,7 +94,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     if params['compress_state'] == False:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
                        'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch',
-                       'bloom', 'bloom_adaptive', 'context_aware_bloom', 'bloom_conflict_sets', 'fp_aware_bloom_conflict_sets']:
+                       'bloom', 'bloom_adaptive', 'fp_aware_bloom', 'bloom_conflict_sets', 'fp_aware_bloom_conflict_sets']:
             comp_dict[method] = Compression.fake
 
     default_params = {}

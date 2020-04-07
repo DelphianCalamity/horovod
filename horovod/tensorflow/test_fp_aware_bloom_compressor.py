@@ -16,7 +16,7 @@ with tf.Session() as sess:
 
 init_tensor = tf.bitcast(init_tensor, tf.int32)
 
-bloom_compressor = tf.load_op_library('./context_aware_bloom_compressor.so').context_aware_bloom_compressor
+bloom_compressor = tf.load_op_library('./fp_aware_bloom_compressor.so').fp_aware_bloom_compressor
 bloom_decompressor = tf.load_op_library('./bloom_decompressor.so').bloom_decompressor
 
 # bloom size is given in bytes, so for a bloom of 8 bits set bloom_size to 1
@@ -36,7 +36,7 @@ compressed_tensor = bloom_compressor(init_tensor, indices,
 									 verbosity=1)
 
 decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size,
-										 1,
+										 1, k,
 										 hash_num=hash_num,
 										 bloom_size=bloom_size,
 										 logfile_suffix=1,

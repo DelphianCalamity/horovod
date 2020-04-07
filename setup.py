@@ -872,7 +872,7 @@ def build_tf_extension(build_ext, global_options):
                                  ['horovod/tensorflow/bloom_decompressor_conflict_sets.cc'] + \
                                  ['horovod/tensorflow/bloom_adaptive_compressor.cc'] + \
                                  ['horovod/tensorflow/bloom_adaptive_decompressor.cc'] + \
-                                 ['horovod/tensorflow/context_aware_bloom_compressor.cc'] + \
+                                 ['horovod/tensorflow/fp_aware_bloom_compressor.cc'] + \
                                  ['horovod/tensorflow/fp_aware_bloom_compressor_conflict_sets.cc'] + \
                                  ['horovod/tensorflow/rle_compression/rle_compression0_8.cc'] + \
                                  ['horovod/tensorflow/rle_compression/rle_compression1_8.cc'] + \
