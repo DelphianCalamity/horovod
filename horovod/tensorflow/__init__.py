@@ -86,7 +86,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     comp_dict["sketch"] = Compression.sketch
     comp_dict["bloom"] = Compression.bloom
     comp_dict["bloom_adaptive"] = Compression.bloom_adaptive
-    comp_dict["context_aware_bloom"] = Compression.context_aware_bloom
+    comp_dict["fp_aware_bloom"] = Compression.fp_aware_bloom
     comp_dict["bloom_conflict_sets"] = Compression.bloom_conflict_sets
     comp_dict["fp_aware_bloom_conflict_sets"] = Compression.fp_aware_bloom_conflict_sets
 
