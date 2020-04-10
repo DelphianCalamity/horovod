@@ -93,8 +93,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     # testing
     if params['compress_state'] == False:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
-                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch',
-                       'bloom', 'bloom_adaptive', 'fp_aware_bloom', 'bloom_conflict_sets', 'fp_aware_bloom_conflict_sets']:
+                       'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch', 'bloom']:
             comp_dict[method] = Compression.fake
 
     default_params = {}
@@ -252,7 +251,6 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
             tensor_compensate = compression.memory_compensate(tensor, params)
             # with tf.device(params['compression_device']):
             tensor_compressed, ctx = compression.compress(tensor_compensate, params)
-            params['suffix'] = 4
             memory_update_op = compression.memory_update(tensor, tensor_compensate, tensor_compressed, ctx, params)
 
             if comm_method == 'allreduce':

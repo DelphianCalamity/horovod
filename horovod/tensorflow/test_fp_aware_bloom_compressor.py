@@ -27,6 +27,7 @@ hash_num = int(math.ceil(h))
 decompressed_size = 16
 print(hash_num)
 step=tf.placeholder(tf.int32, name='step')
+mem_mode=0
 compressed_tensor = bloom_compressor(init_tensor, indices,
 									 1,
 									 hash_num=hash_num,
@@ -37,6 +38,7 @@ compressed_tensor = bloom_compressor(init_tensor, indices,
 
 decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size,
 										 1, k,
+										 mem_mode=mem_mode,
 										 hash_num=hash_num,
 										 bloom_size=bloom_size,
 										 logfile_suffix=1,
@@ -50,4 +52,4 @@ with tf.Session() as sess:
 	print("Indices: ", sess.run(indices))
 	# sess.run(compressed_tensor, feed_dict={step:0})
 	# print("Compressed Tensor Shape: ", compressed_tensor.get_shape())
-	sess.run(decompressed_tensor, feed_dict={step:0})
+	sess.run(decompressed_tensor, feed_dict={step:1})

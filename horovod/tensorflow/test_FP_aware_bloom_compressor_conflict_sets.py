@@ -39,7 +39,7 @@ print("BLOOM:", bloom_size)
 print("HASHNUM:", hash_num)
 
 decompressed_size = 5
-
+mem_mode=0
 step=tf.placeholder(tf.int64, name='step')
 compressed_tensor = bloom_compressor(log_init_tensor, indices, step,
 									 hash_num=hash_num,
@@ -49,6 +49,7 @@ compressed_tensor = bloom_compressor(log_init_tensor, indices, step,
 									 verbosity=1)
 
 decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, step, k,
+										 mem_mode=mem_mode,
 										 hash_num=hash_num,
 										 bloom_size=bloom_size,
 										 logfile_suffix=1,

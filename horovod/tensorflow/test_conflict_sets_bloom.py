@@ -2,8 +2,9 @@ from __future__ import division
 import tensorflow as tf
 import math
 
-init_tensor = tf.constant([1.3, 10.2, 20.3, 2.5, 3.6])
-k=3
+init_tensor = tf.constant([100, 102, 203, 250, 360, 300, 66, 100, 330, 220, 33, 66, 67, 8, 9, 2])
+N=16
+k=10
 log_init_tensor = tf.bitcast(init_tensor, tf.int32)
 
 
@@ -14,8 +15,8 @@ with tf.Session() as sess:
 	print("Values Int: ", sess.run(values))
 values = tf.bitcast(values, tf.int32)
 
-bloom_compressor = tf.load_op_library('./bloom_compressor.so').bloom_compressor
-bloom_decompressor = tf.load_op_library('./bloom_decompressor.so').bloom_decompressor
+bloom_compressor = tf.load_op_library('./bloom_compressor_conflict_sets.so').bloom_compressor
+bloom_decompressor = tf.load_op_library('./bloom_decompressor_conflict_sets.so').bloom_decompressor
 
 # bloom size is given in bytes, so for a bloom of 8 bits set bloom_size to 1
 # bloom_size = 1
@@ -32,24 +33,29 @@ if rem != 0:
 h = (bloom_size * 8 / k) * math.log(2)
 hash_num = int(math.ceil(h))
 
-bloom_size=1
-hash_num=8
+# bloom_size=1
+# hash_num=8
+
 print("BLOOM:", bloom_size)
 print("HASHNUM:", hash_num)
 
-decompressed_size = 5
-
+policy = "leftmostK"
+mem_mode=0
 step=tf.placeholder(tf.int64, name='step')
 compressed_tensor = bloom_compressor(values, indices,
 									 log_init_tensor,
 									 step,
+									 false_positives_aware=False,
+									 policy=policy,
 									 hash_num=hash_num,
 									 bloom_size=bloom_size,
 									 logfile_suffix=1,
 									 logs_path_suffix=1,
 									 verbosity=1)
 
-decompressed_tensor = bloom_decompressor(compressed_tensor, decompressed_size, step, 3,
+decompressed_tensor = bloom_decompressor(compressed_tensor, N, step, 3,
+										 policy=policy,
+										 mem_mode=mem_mode,
 										 hash_num=hash_num,
 										 bloom_size=bloom_size,
 										 logfile_suffix=1,
