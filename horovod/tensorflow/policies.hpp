@@ -3,13 +3,17 @@
 
 #include <iostream>
 
-#include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
-#include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/op.h"
 
+#include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
+#include "../../third_party/bloomfilter/inc/MurmurHash.hpp"
+#include "../../third_party/bloomfilter/inc/FnvHash.hpp"
 
 using namespace tensorflow;
+#include <random>
 
 
 class Policies {
@@ -39,9 +43,7 @@ public:
         return policy_errors;
     }
 
-    static void conflict_sets_policy(int N, int K, int seed, bloom::OrdinaryBloomFilter<uint32_t>& bloom,
-                                    std::vector<int>& selected_indices) {
-        std::map<int, std::vector<int>> conflict_sets;
+    static void build_conflict_sets(int N, bloom::OrdinaryBloomFilter<uint32_t>& bloom, std::map<int, std::vector<int>>& conflict_sets) {
         // Iterating over the universe and collecting the conflict sets
         uint8_t hash_num = bloom.Get_numHashes();
         for (size_t i=0; i<N; i++) {
@@ -55,49 +57,38 @@ public:
                 }
             }
         }
-        // Sort the conlict sets by their size
-        std::vector<std::vector<int>> conflict_sets_ordered;
-        conflict_sets_ordered.resize(conflict_sets.size());
+    }
+
+    static void transform_and_sort(std::map<int, std::vector<int>>& conflict_sets, std::vector<std::vector<int>>& conflict_sets_ordered) {
 
         typedef std::function<std::vector<int>(std::pair<int, std::vector<int>>)> Transformator;
         Transformator transformator = [](std::pair<int, std::vector<int>> i) {
             return i.second;
         };
-
-        std::transform(conflict_sets.begin(), conflict_sets.end(), conflict_sets_ordered.begin(), transformator );
+        std::transform(conflict_sets.begin(), conflict_sets.end(), conflict_sets_ordered.begin(), transformator);
         std::sort(conflict_sets_ordered.begin(), conflict_sets_ordered.end(), [](const std::vector<int> l, const std::vector<int> r) {
             return l.size() < r.size();
         });
+    }
 
-        // Print Conflict Sets
-        for (auto& it: conflict_sets) {
-            std::cout << "Key: " << it.first << ", Values: ";
-             for (auto& itt : it.second)
-                std::cout << itt << ", ";
-             std::cout << std::endl;
-        }
-        std::cout << std::endl;
-        // Print Conflict Sets
-        for (auto& it: conflict_sets_ordered) {
-             std::cout << "{";
-             for (auto& itt : it)
-                std::cout << itt << ", ";
-             std::cout << "}" << std::endl;
-        }
+    static void choose_indices_from_conflict_sets(int K, int seed, std::vector<std::vector<int>>& conflict_sets_ordered, std::vector<int>& selected_indices) {
+//        srand(seed);
+        std::default_random_engine generator;
+        generator.seed(seed);
 
-        // Collect selected indices
-
-        srand(seed);
         int random, idx, left = K;
         while (left > 0) {                                      // Don't stop until you have selected K positives
             std::vector<int>& cset = conflict_sets_ordered[0];
-            random = rand() % cset.size();    // choose randomly an element from the set
+            std::uniform_int_distribution<int> distribution(0, cset.size()-1);
+            random = distribution(generator);
+//            random = rand() % cset.size();    // choose randomly an element from the set
             idx = cset[random];
             selected_indices.push_back(idx);
             left--;
             // Search the item in all the other conflicts sets and erase it
             // Then move those conflicts sets at the end of the vector
-            for (int i=0; i<conflict_sets_ordered.size(); i++) {
+            int size = conflict_sets_ordered.size();
+            for (int i=0; i<size; i++) {
                 std::vector<int>& cs = conflict_sets_ordered[i];
                 auto it = std::find(cs.begin(), cs.end(), idx);
                 if (it != cs.end()) {
@@ -109,27 +100,22 @@ public:
                     i--;
                 }
             }
-
-            std::cout << std::endl;
-            for (auto& it: conflict_sets_ordered) {
-             std::cout << "{";
-             for (auto& itt : it)
-                std::cout << itt << ", ";
-             std::cout << "}" << std::endl;
-            }
-
-             for (auto& it : selected_indices) {
-                std::cout << it << ", ";
-             }
-             std::cout << std::endl;
         }
-
         std::sort(selected_indices.begin(), selected_indices.end());
+    }
 
-             for (auto& it : selected_indices) {
-                std::cout << it << ", ";
-             }
-             std::cout << std::endl;
+    static void conflict_sets_policy(int N, int K, int seed, bloom::OrdinaryBloomFilter<uint32_t>& bloom,
+                                    std::vector<int>& selected_indices) {
+        std::map<int, std::vector<int>> conflict_sets;
+        build_conflict_sets(N, bloom, conflict_sets);
+
+        // Sort the conflict sets by their size
+        std::vector<std::vector<int>> conflict_sets_ordered;
+        conflict_sets_ordered.resize(conflict_sets.size());
+        transform_and_sort(conflict_sets, conflict_sets_ordered);
+
+        // Collect selected indices
+        choose_indices_from_conflict_sets(K, seed, conflict_sets_ordered, selected_indices);
      }
 
     static void leftmostK(int N, int K, bloom::OrdinaryBloomFilter<uint32_t>& bloom,
@@ -142,7 +128,9 @@ public:
         }
      }
 
-     static void select_indices(std::string policy, int N, int K, int64 step, bloom::OrdinaryBloomFilter<uint32_t>& bloom, std::vector<int>& selected_indices) {
+     static void select_indices(std::string policy, int N, int K, int64 step,
+                                bloom::OrdinaryBloomFilter<uint32_t>& bloom,
+                                std::vector<int>& selected_indices) {
         if (policy == "conflict_sets") {
             conflict_sets_policy(N, K, step, bloom, selected_indices);
         } else if (policy == "leftmostK") {

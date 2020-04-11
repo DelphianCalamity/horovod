@@ -11,7 +11,6 @@
 #include "./compression_utils.hpp"
 
 #include <cmath>
-
 #include <string>
 #include <cstdlib>
 #include <algorithm>
@@ -50,18 +49,6 @@ REGISTER_OP("BloomDecompressor")
 .Output("decompressed_tensor: int32")
 .Doc(R"doc()doc");
 
-namespace std {
-    template<>
-    struct hash<bloom::HashParams<uint32_t>> {
-        size_t operator()(bloom::HashParams<uint32_t> const &s) const {
-            uint32_t out;
-            bloom::MurmurHash3::murmur_hash3_x86_32((uint32_t*) &s.a, sizeof(s.a), s.b, (uint32_t*) &out);
-            return out;
-        }
-    };
-}
-
-
 class BloomCompressorOp : public OpKernel {
 
 public:
@@ -83,6 +70,7 @@ public:
         const Tensor &indices = context->input(1);  auto indices_flat = indices.flat<int>();
         const Tensor &initial_tensor = context->input(2); auto initial_flat = initial_tensor.flat<int>();
         int64 step = context->input(3).flat<int64>()(0);
+
         int N = initial_flat.size();
         int K = values_flat.size();
         int output_concat_dim = K*sizeof(int) + bloom_size;
@@ -108,8 +96,8 @@ public:
 
         std::vector<int> selected_indices;
         // Copy the values in the output tensor
+        std::vector<int> new_values;
         if (false_positives_aware) {
-            std::vector<int> new_values;
             // Select Indices using a Policy
             Policies::select_indices(policy, N, K, step, bloom, selected_indices);
             for (int i=0; i<K; i++) {
@@ -129,7 +117,7 @@ public:
                 Policies::select_indices(policy, N, K, step, bloom, selected_indices);
             }
             CompressionUtilities::logging_compressor(bloom, N, K, output_concat_dim, initial_tensor, indices, values,
-                                selected_indices, logfile_suffix, logs_path_suffix, step, policy);
+                                            new_values, selected_indices, logfile_suffix, logs_path_suffix, step, policy);
         }
         // *********************** For Debugging ********************** //
 
@@ -167,8 +155,7 @@ public:
         auto compressed_tensor_flat = compressed_tensor.flat<int8>();
         int N = *context->input(1).flat<int>().data();
         int K = (compressed_tensor_flat.size()-bloom_size)/sizeof(int);
-        const Tensor &step_tensor = context->input(2);
-        auto step = step_tensor.flat<int64>();
+        int64 step = context->input(2).flat<int64>()(0);
 
         // Reconstruct the bloom filter
         const int8 *ptr = compressed_tensor_flat.data();           // Note: int8 is 1 byte
@@ -188,7 +175,6 @@ public:
 
         // Select Indices using a Policy
         std::vector<int> selected_indices;
-        // Select Indices using a Policy
         Policies::select_indices(policy, N, K, step, bloom, selected_indices);
 
         // Map values to the selected indices
@@ -197,9 +183,9 @@ public:
         }
 
         // *********************** For Debugging ********************** //
-        if (verbosity != 0 && step(0) % verbosity == 0 && mem_mode == 0) {
+        if (verbosity != 0 && step % verbosity == 0 && mem_mode == 0) {
             CompressionUtilities::logging_decompressor(bloom, N, K, values_vec, selected_indices, logfile_suffix,
-                                logs_path_suffix, suffix, step(0), decompressed_tensor, policy);
+                                logs_path_suffix, suffix, step, decompressed_tensor, policy);
         }
         // *********************** For Debugging ********************** //
 
