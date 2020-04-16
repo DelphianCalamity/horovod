@@ -20,10 +20,13 @@ using namespace tensorflow;
 
 REGISTER_OP("BloomCompressor")
 .Attr("T: {int32, int64, float16, float32, float64}")
+.Attr("stacked: bool")
 .Attr("false_positives_aware: bool")
 .Attr("policy: string")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
+.Attr("second_hash_num: int")
+.Attr("second_bloom_size: int")
 .Attr("logfile_suffix: int")       // For debugging
 .Attr("logs_path_suffix: int")     // For debugging
 .Attr("verbosity: int")            // For debugging
@@ -35,10 +38,13 @@ REGISTER_OP("BloomCompressor")
 .Doc(R"doc()doc");
 
 REGISTER_OP("BloomDecompressor")
+.Attr("stacked: bool")
 .Attr("policy: string")
 .Attr("mem_mode: int")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
+.Attr("second_hash_num: int")
+.Attr("second_bloom_size: int")
 .Attr("logfile_suffix: int")            // For debugging
 .Attr("logs_path_suffix: int")          // For debugging
 .Attr("suffix: int")                    // For debugging
@@ -54,10 +60,13 @@ class BloomCompressorOp : public OpKernel {
 public:
 
     explicit BloomCompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+        OP_REQUIRES_OK(context, context->GetAttr("stacked", &stacked));
         OP_REQUIRES_OK(context, context->GetAttr("false_positives_aware", &false_positives_aware));
         OP_REQUIRES_OK(context, context->GetAttr("policy", &policy));
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        OP_REQUIRES_OK(context, context->GetAttr("second_hash_num", &second_hash_num));
+        OP_REQUIRES_OK(context, context->GetAttr("second_bloom_size", &second_bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
@@ -75,31 +84,48 @@ public:
         int K = values_flat.size();
         int output_concat_dim = K*sizeof(int) + bloom_size;
 
-        // Building Bloom Filter
-        bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
-        for (int i=0; i<K; ++i) {
-            bloom.Insert(indices_flat(i));
-        }
-
         // Create an output tensor
         TensorShape output_shape;
         output_shape.AddDim(output_concat_dim);
         Tensor *output = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output));
-
         auto output_flat = output->template flat<int8>();
         int8* out_ptr = output_flat.data();
 
+        // Building Bloom Filter
+        bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
+        for (int i=0; i<K; ++i) {
+            bloom.Insert(indices_flat(i));
+        }
         // Copy the bloom filter in the output tensor
-        std::vector<unsigned char> &bloom_vec = bloom.Get_bloom();
-        std::copy(bloom_vec.begin(), bloom_vec.end(), out_ptr+K*sizeof(int));
+        std::copy(bloom.Get_bloom().begin(), bloom.Get_bloom().end(), out_ptr+K*sizeof(int));
+bloom.print();
+        bloom::OrdinaryBloomFilter<uint32_t>* second_bloom_ptr = NULL;
+        if (stacked) {
+            output_concat_dim += second_bloom_size;
+            second_bloom_ptr = new bloom::OrdinaryBloomFilter<uint32_t>(second_hash_num, second_bloom_size);
+            // Retrieve false positive items
+            std::vector<int> false_positive_items;
+            for (int i=0; i<N; ++i) {
+                if (bloom.Query(i) && !Policies::find(indices, i)) {
+                    false_positive_items.push_back(i);
+                }
+            }
+            // Build second bloom on the false positive items
+            for (int i=0; i<false_positive_items.size(); ++i) {
+                second_bloom_ptr->Insert(false_positive_items[i]);
+            }
+            // Copy the second bloom filter in the output tensor
+            std::copy(second_bloom_ptr->Get_bloom().begin(), second_bloom_ptr->Get_bloom().end(), out_ptr+K*sizeof(int)+bloom_size);
+second_bloom_ptr->print();
+        }
 
         std::vector<int> selected_indices;
         // Copy the values in the output tensor
         std::vector<int> new_values;
         if (false_positives_aware) {
             // Select Indices using a Policy
-            Policies::select_indices(policy, N, K, step, bloom, selected_indices);
+            Policies::select_indices(policy, N, K, step, bloom, second_bloom_ptr, selected_indices);
             for (int i=0; i<K; i++) {
                 int chosen_index = selected_indices[i];
                 new_values.push_back(initial_flat(chosen_index));
@@ -114,20 +140,25 @@ public:
         if (verbosity != 0 && step % verbosity == 0 ) {
             if (!false_positives_aware) {
                 // Select Indices using a Policy
-                Policies::select_indices(policy, N, K, step, bloom, selected_indices);
+                Policies::select_indices(policy, N, K, step, bloom, second_bloom_ptr, selected_indices);
             }
             CompressionUtilities::logging_compressor(bloom, N, K, output_concat_dim, initial_tensor, indices, values,
                                             new_values, selected_indices, logfile_suffix, logs_path_suffix, step, policy);
         }
         // *********************** For Debugging ********************** //
-
+        if (second_bloom_ptr != NULL) {
+            free(second_bloom_ptr);
+        }
     }
 
 private:
+    bool stacked;
     bool false_positives_aware;
     string policy;
     int hash_num;
     int bloom_size;
+    int second_hash_num;
+    int second_bloom_size;
     int logfile_suffix;     // For debugging
     int logs_path_suffix;   // For debugging
     int verbosity;          // For debugging
@@ -138,10 +169,13 @@ class BloomDecompressorOp : public OpKernel {
 public:
 
     explicit BloomDecompressorOp(OpKernelConstruction *context) : OpKernel(context) {
+        OP_REQUIRES_OK(context, context->GetAttr("stacked", &stacked));
         OP_REQUIRES_OK(context, context->GetAttr("policy", &policy));
         OP_REQUIRES_OK(context, context->GetAttr("mem_mode", &mem_mode));
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        OP_REQUIRES_OK(context, context->GetAttr("second_hash_num", &second_hash_num));
+        OP_REQUIRES_OK(context, context->GetAttr("second_bloom_size", &second_bloom_size));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));                       // For debugging
@@ -154,7 +188,7 @@ public:
         const Tensor &compressed_tensor = context->input(0);
         auto compressed_tensor_flat = compressed_tensor.flat<int8>();
         int N = *context->input(1).flat<int>().data();
-        int K = (compressed_tensor_flat.size()-bloom_size)/sizeof(int);
+        int K = (compressed_tensor_flat.size()-bloom_size-second_bloom_size)/sizeof(int);
         int64 step = context->input(2).flat<int64>()(0);
 
         // Reconstruct the bloom filter
@@ -164,6 +198,13 @@ public:
         memcpy(values_vec, ptr, values_bytes);
         ptr += values_bytes;
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size, ptr);
+
+
+        bloom::OrdinaryBloomFilter<uint32_t>* second_bloom_ptr = NULL;
+        if (stacked) {
+            ptr += bloom_size;
+            second_bloom_ptr = new bloom::OrdinaryBloomFilter<uint32_t>(second_hash_num, second_bloom_size, ptr);
+        }
 
         // Create an output tensor
         TensorShape decompressed_tensor_shape;
@@ -175,7 +216,7 @@ public:
 
         // Select Indices using a Policy
         std::vector<int> selected_indices;
-        Policies::select_indices(policy, N, K, step, bloom, selected_indices);
+        Policies::select_indices(policy, N, K, step, bloom, second_bloom_ptr, selected_indices);
 
         // Map values to the selected indices
         for (int i=0; i<K; i++) {
@@ -188,15 +229,20 @@ public:
                                 logs_path_suffix, suffix, step, decompressed_tensor, policy);
         }
         // *********************** For Debugging ********************** //
-
         free(values_vec);
+        if (second_bloom_ptr != NULL) {
+            free(second_bloom_ptr);
+        }
     }
 
 private:
+    bool stacked;
     string policy;
     int mem_mode;
     int hash_num;
     int bloom_size;
+    int second_hash_num;
+    int second_bloom_size;
     int logfile_suffix;     // For debugging
     int logs_path_suffix;   // For debugging
     int suffix;             // For debugging

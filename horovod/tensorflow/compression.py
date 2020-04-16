@@ -285,17 +285,29 @@ class TopKCompressor(Compressor):
 class Bloom_Filter_Compressor(Compressor):
     """"""
     @staticmethod
-    def bloom_configuration(k, fpr):
+    def bloom_configuration(k, params, tensor_size):
         # Given FPR compute M and H
-        m = (k*abs(math.log(fpr))) / (math.pow(math.log(2), 2))
+        m = (k*abs(math.log(params['fpr']))) / (math.pow(math.log(2), 2))
         # Give bloom size in number of bytes ; bloom size must be a multiple of 8
         m = int(m/8)
         rem = m % 8
-        if rem != 0:
+        if rem != 0 or m == 0:
             m += 1
         h = (m*8 / k)*math.log(2)
         h = int(math.ceil(h))
-        return m, h
+        assert h < 256, "Number of hash functions too big"
+
+        if params['stacked']:
+            k2 = math.ceil(params['fpr']*tensor_size)
+            m2 = (k2 * abs(math.log(params["second_fpr"]))) / (math.pow(math.log(2), 2))
+            m2 = int(m2/8)
+            rem = m2 % 8
+            if rem != 0 or m2 == 0:
+                m2 += 1
+            h2 = int(math.ceil((m2*8/k2) * math.log(2)))
+            assert params['h2'] < 256, "Number of hash functions too big"
+            return m, h, m2, h2
+        return m, h, 0, 0
 
 
     @staticmethod
@@ -310,9 +322,7 @@ class Bloom_Filter_Compressor(Compressor):
 
         # Configure bloom filter's m, k values
         assert params["fpr"] is not None, "False Positive Rate is None"
-        params['m'], params['k'] = Bloom_Filter_Compressor.bloom_configuration(k, params["fpr"])
-        assert params['k'] < 256, "Number of hash functions too big"
-
+        params['m'], params['k'], params['m2'], params['k2'] = Bloom_Filter_Compressor.bloom_configuration(k, params, elemnum)
         params["bloom_config"].add_data(k, params['m']*8, params['k'], params["fpr"])
         params["throughput_info"].add_data(elemnum, elemnum/8,  params['m']*8, (params['m']*8)/8, elemnum-params['m']*8, (elemnum-params['m']*8)/8)
 
@@ -328,10 +338,13 @@ class Bloom_Filter_Compressor(Compressor):
 
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
         compressed_tensor = bloom_compressor(values, indices, log_initial_tensor, tf.train.get_or_create_global_step(),
+                                             stacked=params['stacked'],
                                              false_positives_aware=params['false_positives_aware'],
                                              policy=params['policy'],
                                              hash_num=params['k'],
                                              bloom_size=params['m'],
+                                             second_hash_num=params['k2'],
+                                             second_bloom_size=params['m2'],
                                              logfile_suffix=params['logfile_suffix'],
                                              logs_path_suffix=params['logs_path_suffix'],
                                              verbosity=params['verbosity'])
@@ -351,10 +364,13 @@ class Bloom_Filter_Compressor(Compressor):
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
                                                  tf.train.get_or_create_global_step(),
+                                                 stacked=params['stacked'],
                                                  policy=params['policy'],
                                                  mem_mode=params['mem_mode'],
                                                  hash_num=params['k'],
                                                  bloom_size=params['m'],
+                                                 second_hash_num=params['k2'],
+                                                 second_bloom_size=params['m2'],
                                                  logfile_suffix=params['logfile_suffix'],
                                                  logs_path_suffix=params['logs_path_suffix'],
                                                  suffix=params['suffix'],

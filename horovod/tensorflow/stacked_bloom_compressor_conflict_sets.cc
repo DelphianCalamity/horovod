@@ -15,10 +15,12 @@
 
 using namespace tensorflow;
 
-REGISTER_OP("BloomCompressorConflictSets")
+REGISTER_OP("StackedBloomCompressorConflictSets")
 .Attr("T: {int32, int64, float16, float32, float64}")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
+.Attr("hash_num2: int")
+.Attr("bloom_size2: int")
 .Attr("logfile_suffix: int")       // For debugging
 .Attr("logs_path_suffix: int")     // For debugging
 .Attr("verbosity: int")            // For debugging
@@ -41,13 +43,15 @@ namespace std {
 };
 }
 
-class BloomCompressorConflictSetsOp : public OpKernel {
+class StackedBloomCompressorConflictSetsOp : public OpKernel {
 
 public:
 
-    explicit BloomCompressorConflictSetsOp(OpKernelConstruction *context) : OpKernel(context) {
-        OP_REQUIRES_OK(context, context->GetAttr("hash_num", &h));
-        OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &m));
+    explicit StackedBloomCompressorConflictSetsOp(OpKernelConstruction *context) : OpKernel(context) {
+        OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
+        OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        OP_REQUIRES_OK(context, context->GetAttr("hash_num2", &hash_num2));
+        OP_REQUIRES_OK(context, context->GetAttr("bloom_size2", &bloom_size2));
         OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
         OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
@@ -70,17 +74,35 @@ public:
         const Tensor &values = context->input(0);  auto values_flat = values.flat<int>();
         const Tensor &indices = context->input(1);  auto indices_flat = indices.flat<int>();
         int values_size = values_flat.size();
+        const Tensor &initial_tensor = context->input(2);
+        auto initial_flat = initial_tensor.flat<int>();
+        int N = initial_flat.size();
+        int K = values_size;
 
-        bloom_size = m;
-        hash_num = h;
+        int output_concat_dim = values_size*sizeof(int) + bloom_size + bloom_size2;
 
-        int output_concat_dim = values_size*sizeof(int) + bloom_size;
-
+/*****************************************************************************/
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
+
+        // Build the first bloom on the indices
         for (int i=0; i<indices_flat.size(); ++i) {
             bloom.Insert(indices_flat(i));
         }
+
+        bloom::OrdinaryBloomFilter<uint32_t> bloom2(hash_num2, bloom_size2);
+        // Retrieve false positive items
+        std::vector<int> false_positive_items;
+        for (int i=0; i<N; ++i) {
+            if (bloom.Query(i) && !find(indices, i)) {
+                false_positive_items.push_back(i);
+            }
+        }
+        // Build second bloom on the false positive items
+        for (int i=0; i<false_positive_items.size(); ++i) {
+            bloom2.Insert(false_positive_items[i]);
+        }
+/*****************************************************************************/
 
         // Create an output tensor
         TensorShape output_shape;
@@ -92,73 +114,72 @@ public:
         int8* out_ptr = output_flat.data();
         const void* values_ptr = values_flat.data();
 
-        std::vector<unsigned char> &bloom_vec = bloom.Get_bloom();
         memcpy(out_ptr, values_ptr, values_size*sizeof(int));
+        std::vector<unsigned char> &bloom_vec = bloom.Get_bloom();
         std::copy(bloom_vec.begin(), bloom_vec.end(), out_ptr+values_size*sizeof(int));
+        std::vector<unsigned char> &bloom_vec2 = bloom2.Get_bloom();
+        std::copy(bloom_vec2.begin(), bloom_vec2.end(), out_ptr+values_size*sizeof(int)+bloom_size);
 
         // *********************** For Debugging ********************** //
         const Tensor &step_tensor = context->input(3);
         auto step = step_tensor.flat<int64>();
 
         if (verbosity != 0 && step(0) % verbosity == 0 ) {
-            const Tensor &initial_tensor = context->input(2);
-            auto initial_flat = initial_tensor.flat<int>();
 
+            // Compute number of false positives
+            int false_positives = 0;
+            for (int i=0; i<N; ++i) {
+                if (bloom.Query(i) && bloom2.Query(i) && !find(indices, i)) {
+                    false_positives++;
+                }
+            }
     /*******************************************************************************************/
-            int N = initial_flat.size();
-            int K = values_size;
+            int random, idx, left = K;
+            std::vector<int> selected_indices;
             std::unordered_map<string, std::vector<int>> conflict_sets;
-
-            // Iterating over the universe and collecting the conflict sets
+            // Iterating over the universe and collecting the conflict sets of bloom1
             for (int i=0; i<N; i++) {
                 if (bloom.Query(i)) {  // If it is positive
+//                    std::cout << "positive: " << i << std::endl;
                     string hash_string = bloom.Hash(i);
 //                    std::cout << "hash_string: " << hash_string << std::endl;
                     conflict_sets[hash_string].push_back(i);
                 }
             }
-//            for (auto& it: conflict_sets) {
-//                std::cout << "Key: " << it.first << ", Values: " << std::endl;
-//                 for (auto& itt : it.second)
-//                    std::cout << itt << " ,";
-//                 std::cout << std::endl;
-//            }
+
+            for (auto& cset: conflict_sets) {
+                if (cset.second.size() == 1) {
+                    selected_indices.push_back(cset.second[0]);
+                    left--;
+                    cset.second.erase(cset.second.begin());
+                }
+            }
+            for (auto& cset: conflict_sets) {
+                for (int i=0; i < cset.second.size(); i++) {
+                    if (!bloom2.Query(cset.second[i])) {  // If it is negative then add to selected items and remove from conflict sets
+                        selected_indices.push_back(cset.second[i]);
+                        left--;
+                        cset.second.erase(cset.second.begin()+i);
+                    }
+                }
+            }
+            // Conflict sets are now pruned
 
             srand(step(0));
-
-            int random, idx, left = K;
-            std::vector<int> selected_indices;
             while (left > 0) {                          // Don't stop until you have selected K positives
                 for (auto& cset: conflict_sets) {       // Choose a positive out of every conflict set - remove it from set
                     if (left == 0)
                         break;
                     random = rand() % cset.second.size();    // choose randomly an element from the set
-//                    std::cout << "Random:" << random << std::endl;
                     idx = cset.second[random];
-//                    std::cout << "Index:" << idx << std::endl;
                     cset.second.erase(cset.second.begin()+random);
-                   /*
-                    std::cout << "Sets-left:  " << std::endl;;
-                    for (auto& it: conflict_sets) {
-                       std::cout << "       Key: " << it.first << ", Values: ";
-                         for (auto& itt : it.second)
-                            std::cout << itt << ", ";
-                         std::cout << std::endl;
-                    }
-                    */
                     selected_indices.push_back(idx);
                     left--;
                 }
             }
             std::sort(selected_indices.begin(), selected_indices.end());
 
-//             for (auto& it : selected_indices) {
-//                std::cout << it << ", ";
-//             }
-//             std::cout << std::endl;
-
-            // Selected-indices contains the indices that will be selected from the decompressor
-            // examine how many of those are false
+            // Selected-indices contains the indices that will be selected from the decompressor examine how many of those are false
             int policy_errors = 0;
             for (int i=0; i<K; i++) {
                 int chosen_index = selected_indices[i];
@@ -167,14 +188,6 @@ public:
                 }
             }
     /*******************************************************************************************/
-
-            // Compute number of false positives
-            int false_positives = 0;
-            for (int i=0; i<initial_flat.size(); ++i) {
-                if (bloom.Query(i) && !find(indices, i)) {
-                    false_positives++;
-                }
-            }
 
             std::string suffix = std::to_string(logfile_suffix);
             std::string logs_suffix = std::to_string(logs_path_suffix);
@@ -185,7 +198,7 @@ public:
             if(systemRet == -1){
                 perror("mkdir failed");
             }
-            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/compressor_conflict_sets_logs_" + suffix + ".txt";
+            std::string str = "logs" + logs_suffix + "/step_" + str_step + "/" + suffix + "/stacked_compressor_conflict_sets_logs_" + suffix + ".txt";
             FILE* f = fopen(str.c_str(),"w");
             if (f==NULL) {
                 perror ("Can't open file");
@@ -193,8 +206,10 @@ public:
             fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(initial_flat.size()).c_str());
             fprintf(f, "Values: %s\n", values.DebugString(values_flat.size()).c_str());
             fprintf(f, "Indices: %s\n\n", indices.DebugString(indices_flat.size()).c_str());
-            fprintf(f, "Bloom size: = %d\n", bloom_size);
+            fprintf(f, "Bloom size 1: = %d\n", bloom_size);
             bloom.fprint(f);
+            fprintf(f, "Bloom size 2: = %d\n", bloom_size2);
+            bloom2.fprint(f);
             fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
             fprintf(f, "FalsePositives: %d\n", false_positives);
             fprintf(f, "Total: %d\n", initial_flat.size());
@@ -235,12 +250,12 @@ public:
 private:
     int hash_num;
     int bloom_size;
-    int h;
-    int m;
+    int hash_num2;
+    int bloom_size2;
     int logfile_suffix;     // For debugging
     int logs_path_suffix;   // For debugging
     int verbosity;          // For debugging
 };
 
 
-REGISTER_KERNEL_BUILDER(Name("BloomCompressorConflictSets").Device(DEVICE_CPU), BloomCompressorConflictSetsOp);
+REGISTER_KERNEL_BUILDER(Name("StackedBloomCompressorConflictSets").Device(DEVICE_CPU), StackedBloomCompressorConflictSetsOp);
