@@ -164,10 +164,10 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                 summed_tensor_compressed = []
 
                 for i in range(len(tensors)):
-                    if params['debug']:
-                        tensors[i] = tf.Print(tensors[i], [tf.size(tensors[i])],
-                                              message="==Debug== tensor %d/%d on rank %d %s size:"
-                                                      % (i, len(tensors), rank(), tensors[i].dtype))
+                    # if params['debug']:
+                    #     tensors[i] = tf.Print(tensors[i], [tf.size(tensors[i])],
+                    #                           message="==Debug== tensor %d/%d on rank %d %s size:"
+                    #                                   % (i, len(tensors), rank(), tensors[i].dtype))
                     summed_tensor_compressed.append(_allreduce(tensors[i]))
                 return summed_tensor_compressed
 
@@ -191,10 +191,10 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                     # tensors_shape[i] = tf.shape(tensors[i])
                     tensors_1d[i] = tensors[i]
                     #print tensor size
-                    if params['debug']:
-                        tensors_1d[i] = tf.Print(tensors_1d[i], [tf.size(tensors_1d[i])],
-                                                 message="==Debug== tensor %d/%d on rank %d %s size:"
-                                                         % (i, len(tensors), rank(), tensors_1d[i].dtype))
+                    # if params['debug']:
+                    #     tensors_1d[i] = tf.Print(tensors_1d[i], [tf.size(tensors_1d[i])],
+                    #                              message="==Debug== tensor %d/%d on rank %d %s size:"
+                    #                                      % (i, len(tensors), rank(), tensors_1d[i].dtype))
                     tensors_ag[i] = allgather(tensors_1d[i])
                 tensors_size = tf.concat(tensors_size, 0)
 
@@ -227,10 +227,10 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
                 new_tensors = defaultdict(list)
                 for ranki in range(size()):
                     for i in range(len(tensors)):
-                        if params['debug']:
-                            tensors[i] = tf.Print(tensors[i], [tf.size(tensors[i])],
-                                                  message="==Debug== tensor %d/%d on rank %d %s size:"
-                                                          % (i, len(tensors), rank(), tensors[i].dtype))
+                        # if params['debug']:
+                        #     tensors[i] = tf.Print(tensors[i], [tf.size(tensors[i])],
+                        #                           message="==Debug== tensor %d/%d on rank %d %s size:"
+                        #                                   % (i, len(tensors), rank(), tensors[i].dtype))
                         new_tensors[ranki].append(broadcast(tensors[i], root_rank=ranki, name=None))
                 return new_tensors
 
@@ -239,12 +239,12 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
             communicate['allgather'] = Allgather
             communicate['broadcast'] = Broadcast
             tensor_compensate = compression.memory_compensate(tensor, params)
-            if params['memory_debug']:
-                tensor_compensate = tf.cond(tf.train.get_global_step() < 3,
-                                            lambda: tf.Print(tensor_compensate, [tf.train.get_global_step(),
-                                                    tf.reduce_sum(tensor_compensate - tensor)],
-                                                    message="==Debug== tensor_compensate - tensor:")
-                                            , lambda: tensor_compensate)
+            # if params['memory_debug']:
+            #     tensor_compensate = tf.cond(tf.train.get_global_step() < 3,
+            #                                 lambda: tf.Print(tensor_compensate, [tf.train.get_global_step(),
+            #                                         tf.reduce_sum(tensor_compensate - tensor)],
+            #                                         message="==Debug== tensor_compensate - tensor:")
+            #                                 , lambda: tensor_compensate)
             tensor_compressed, ctx = compression.compress(tensor_compensate, params)
 
             memory_update_op = compression.memory_update(tensor, tensor_compensate, tensor_compressed, ctx, params)
@@ -383,6 +383,18 @@ def _make_allreduce_grads_fn(name, device_dense, device_sparse,
     if type(params)==str:
         params = json.loads(params)
     def allreduce_grads(grads):
+        params_size = 0
+        params_size_ls = []
+        for grad in grads:
+            params_size += tf.size(grad)
+            params_size_ls.append(tf.zeros([tf.size(grad)]).get_shape().as_list())
+
+        print('The model has ', len(grads), ' gradients')
+        print("The model has ", tf.zeros([params_size]).get_shape().as_list(), ' parameters')
+        print("=======Parameters size print BEGIN========")
+        print(params_size_ls)
+        print("=======Parameters size print END========")
+
         with tf.name_scope(name + "_Allreduce"):
             if sparse_as_dense:
                 grads = [tf.convert_to_tensor(grad)
@@ -446,7 +458,7 @@ if _LegacyOptimizer is not None:
             """
             gradients = self._optimizer.compute_gradients(*args, **kwargs)
             # if os.environ.get('HOROVOD_DEBUG', False):
-            print(f"==Debug== The model has {len(gradients)} gradient tensors")
+            # print(f"==Debug== The model has {len(gradients)} gradient tensors")
             if size() > 1:
                 grads, vars = zip(*gradients)
                 avg_grads = self._allreduce_grads(grads)

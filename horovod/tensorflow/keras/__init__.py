@@ -41,11 +41,10 @@ from horovod.tensorflow.keras import callbacks
 def DistributedOptimizer(optimizer, name=None,
                          device_dense='', device_sparse='',
                          compression=Compression.none,
-                         sparse_as_dense=False):
+                         sparse_as_dense=False, params=None):
     """
     An optimizer that wraps another keras.optimizers.Optimizer, using an allreduce to
     average gradient values before applying gradients to model weights.
-
     Args:
         optimizer: Optimizer to use for computing gradients and applying updates.
         name: Optional name prefix for the operations created when applying
@@ -64,12 +63,11 @@ def DistributedOptimizer(optimizer, name=None,
                          Defaults to false.    """
     return _impl.create_distributed_optimizer(keras, optimizer, name,
                                               device_dense, device_sparse, compression,
-                                              sparse_as_dense)
+                                              sparse_as_dense, params)
 
 
 def broadcast_global_variables(root_rank):
     """Broadcasts all global variables from root rank to all other processes.
-
     Arguments:
         root_rank: Rank of the process from which global variables will be broadcasted
                    to all other processes.
@@ -80,7 +78,6 @@ def broadcast_global_variables(root_rank):
 def allreduce(value, name=None, average=True):
     """
     Perform an allreduce on a tensor-compatible value.
-
     Arguments:
         value: A tensor-compatible value to reduce.
                The shape of the input must be identical across all ranks.
@@ -94,11 +91,9 @@ def allreduce(value, name=None, average=True):
 def allgather(value, name=None):
     """
     Perform an allgather on a tensor-compatible value.
-
     The concatenation is done on the first dimension, so the input values on the
     different processes must have the same rank and shape, except for the first
     dimension, which is allowed to be different.
-
     Arguments:
         value: A tensor-compatible value to gather.
         name: Optional name prefix for the constants created by this operation.
@@ -109,7 +104,6 @@ def allgather(value, name=None):
 def broadcast(value, root_rank, name=None):
     """
     Perform a broadcast on a tensor-compatible value.
-
     Arguments:
         value: A tensor-compatible value to reduce.
                The shape of the input must be identical across all ranks.
@@ -123,15 +117,12 @@ def broadcast(value, root_rank, name=None):
 def load_model(filepath, custom_optimizers=None, custom_objects=None, compression=Compression.none):
     """
     Loads a saved Keras model with a Horovod DistributedOptimizer.
-
     The DistributedOptimizer will wrap the underlying optimizer used to train
     the saved model, so that the optimizer state (params and weights) will
     be picked up for retraining.
-
     By default, all optimizers in the module `keras.optimizers` will be loaded
     and wrapped without needing to specify any `custom_optimizers` or
     `custom_objects`.
-
     # Arguments
         filepath: One of the following:
             - string, path to the saved model, or
@@ -143,10 +134,8 @@ def load_model(filepath, custom_optimizers=None, custom_objects=None, compressio
         compression: Compression algorithm used to reduce the amount of data
                      sent and received by each worker node.  Defaults to not
                      using compression.
-
     # Returns
         A Keras model instance.
-
     # Raises
         ImportError: If h5py is not available.
         ValueError: In case of an invalid savefile.
@@ -154,4 +143,3 @@ def load_model(filepath, custom_optimizers=None, custom_objects=None, compressio
     def wrap_optimizer(cls):
         return lambda **kwargs: DistributedOptimizer(cls(**kwargs), compression=compression)
     return _impl.load_model(keras, wrap_optimizer, filepath, custom_optimizers, custom_objects)
-

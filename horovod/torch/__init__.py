@@ -19,6 +19,8 @@ from __future__ import print_function
 
 from contextlib import contextmanager
 import warnings
+import os
+from distutils.util import strtobool
 
 from horovod.common.util import check_extension
 
@@ -29,10 +31,11 @@ except:
     check_extension('horovod.torch', 'HOROVOD_WITH_PYTORCH',
                     __file__, 'mpi_lib', '_mpi_lib')
 
-from horovod.torch.compression import Compression
+from horovod.torch import compression
 from horovod.torch.mpi_ops import allreduce, allreduce_async, allreduce_, allreduce_async_
 from horovod.torch.mpi_ops import allgather, allgather_async
 from horovod.torch.mpi_ops import broadcast, broadcast_async, broadcast_, broadcast_async_
+from horovod.torch.mpi_ops import join
 from horovod.torch.mpi_ops import poll, synchronize
 from horovod.torch.mpi_ops import init, shutdown
 from horovod.torch.mpi_ops import size, local_size, rank, local_rank
@@ -44,11 +47,159 @@ import torch
 import collections
 
 
+class Communicator(object):
+    def async_send(self, tensors, name):
+        pass
+
+    def wait_receive(self, handles, ctx):
+        pass
+
+
+class Allreduce(Communicator):
+    def __init__(self, compressor):
+        self.compressor = compressor
+
+    def async_send(self, tensors_compressed, name):
+        handles = []
+        for i, tensor_compressed in enumerate(tensors_compressed):
+            handles.append(allreduce_async_(tensor_compressed, self.compressor.average, name + str(i)))
+        return handles
+
+    def wait_receive(self, handles, ctx):
+        output = [synchronize(h) for h in handles]
+        return self.compressor.decompress(output, ctx)
+
+
+class Allgather(Communicator):
+    def __init__(self, compressor, horovod_size):
+        self.horovod_size = horovod_size
+        self.compressor = compressor
+
+    def async_send(self, tensors_compressed, name):
+        """
+        :param tensors_compressed: list of flat tensors to communicate
+        :param name: for the all_gather operation
+        :return: handles to synchronize, tensor sizes per rank
+        """
+        tensors_size = [t.numel() for t in tensors_compressed]  # list of tensor size for this rank
+        if self.compressor.tensors_size_are_same:
+            tensors_size_ag = [tensors_size] * self.horovod_size  # list of tensor sizes per rank
+            tensor_sizes = zip(*tensors_size_ag)  # transpose
+        else:
+            tensors_size = torch.tensor(tensors_size)  # TODO: set device
+            gathered = allgather(tensors_size)  # tensor of tensor sizes per rank
+            tensor_sizes = gathered.view([self.horovod_size, -1]).t().tolist()  # transpose, to list
+
+        handles = []
+        for tensor_compressed in tensors_compressed:
+            handle = allgather_async(tensor_compressed)
+            handles.append(handle)
+
+        return handles, tensor_sizes
+
+    def wait_receive(self, result, ctx):
+        handles, tensor_sizes = result
+        tensors_ag = []
+        for handle, sizes in zip(handles, tensor_sizes):
+            gathered = synchronize(handle)
+            tensors_ag.append(gathered.split(sizes))
+
+        list_tensor_decompressed = []
+        for tensor_compressed in zip(*tensors_ag):
+            tensor_decompressed = self.compressor.decompress(tensor_compressed, ctx)
+            list_tensor_decompressed.append(tensor_decompressed)
+
+        tensors_aggregated = self.compressor.aggregate(list_tensor_decompressed)
+        return (tensors_aggregated / self.horovod_size) if self.compressor.average else tensors_aggregated
+
+
+class Broadcast(Communicator):
+    def __init__(self, compressor, horovod_size):
+        self.horovod_size = horovod_size
+        self.compressor = compressor
+
+    def async_send(self, tensors_compressed, name):
+        handles = []
+        for root_rank in range(self.horovod_size):
+            rank_handles = []
+            for i, tensor_compressed in enumerate(tensors_compressed):
+                rank_handles.append(broadcast_async(tensor_compressed, root_rank, name + str(root_rank) + '_' + str(i)))
+            handles.append(rank_handles)
+        return handles
+
+    def wait_receive(self, handles, ctx):
+        tensors_decompressed = []
+        for ranki in handles:
+            tensors_compressed = [synchronize(h) for h in ranki]
+            tensor_decompressed = self.compressor.decompress(tensors_compressed, ctx)
+            tensors_decompressed.append(tensor_decompressed)
+        tensor_aggregated = self.compressor.aggregate(tensors_decompressed)
+        return (tensor_aggregated / self.horovod_size) if self.compressor.average else tensor_aggregated
+
+
 class _DistributedOptimizer(torch.optim.Optimizer):
-    def __init__(self, params, named_parameters, compression,
+    def __init__(self, params, named_parameters, compressor=None, communication='allreduce',
                  backward_passes_per_step=1):
         super(self.__class__, self).__init__(params)
-        self._compression = compression
+
+        communication = os.environ.get('HOROVOD_COMM_METHOD', 'allreduce')
+
+        if compressor is None:
+            params = {
+                "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
+                "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
+                "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
+                "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
+                "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
+                "gradient_clipping": strtobool(os.environ.get('HOROVOD_GRADIENT_CLIPPING', "False")),
+                "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
+                "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
+                "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
+                "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
+                'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2))
+            }
+
+            if params["compress_method"] in ["none", "efsignsgd", "dgc", "powersgd"]:
+                pass
+            elif params["use_memory"]:
+                memory = compression.ResidualMemory(beta=params["beta"], gamma=params["gamma"])
+            else:
+                memory = compression.NoneMemory()
+
+            if params["compress_method"] == 'none':
+                self.compressor = compression.NoneCompressor()
+            elif params["compress_method"] == 'fp16':
+                self.compressor = compression.FP16Compressor(memory=memory)
+            elif params["compress_method"] == 'randomk':
+                self.compressor = compression.RandomKCompressor(compress_ratio=params['compress_ratio'],
+                                                                memory=memory)
+            elif params["compress_method"] == 'topk':
+                self.compressor = compression.TopKCompressor(compress_ratio=params['compress_ratio'],
+                                                             memory=memory)
+            elif params["compress_method"] == 'threshold':
+                self.compressor = compression.ThresholdCompressor(threshold_val=params['threshold_val'],
+                                                                  memory=memory)
+            elif params["compress_method"] == 'signsgd':
+                self.compressor = compression.SignSGDCompressor(memory=memory)
+            elif params["compress_method"] == 'efsignsgd':
+                self.compressor = compression.EFSignSGDCompressor(lr=params['learning_rate'])
+            elif params["compress_method"] == 'signum':
+                self.compressor = compression.SignumCompressor(momentum=params['momentum'], memory=memory)
+            elif params["compress_method"] == 'qsgd':
+                self.compressor = compression.QSGDCompressor(quantum_num=params['quantum_num'], memory=memory)
+            elif params["compress_method"] == 'onebit':
+                self.compressor = compression.OneBitCompressor(memory=memory)
+            elif params["compress_method"] == 'terngrad':
+                self.compressor = compression.TernGradCompressor(memory=memory)
+            elif params["compress_method"] == 'dgc':
+                self.compressor = compression.DgcCompressor(compress_ratio=params['compress_ratio'], 
+                                                            momentum=params['momentum'],
+                                                            gradient_clipping=params['gradient_clipping'])
+            elif params["compress_method"] == 'powersgd':
+                self.compressor = compression.PowerSGDCompressor(rank=params['compress_rank'],
+                                                                 use_memory=params['use_memory'])
+        else:
+            self.compressor = compressor
 
         if named_parameters is not None:
             named_parameters = list(named_parameters)
@@ -87,8 +238,17 @@ class _DistributedOptimizer(torch.optim.Optimizer):
         self._requires_update = set()
         self._synchronized = False
         self._should_synchronize = True
-        if size() > 1:
+        self.horovod_size = size()
+        if self.horovod_size > 1:
             self._register_hooks()
+            if communication == 'allreduce':
+                self.communication = Allreduce(self.compressor)
+            elif communication == 'allgather':
+                self.communication = Allgather(self.compressor, self.horovod_size)
+            elif communication == 'broadcast':
+                self.communication = Broadcast(self.compressor, self.horovod_size)
+            else:  # error
+                self.communication = None
 
     @staticmethod
     def find_duplicates(lst):
@@ -116,13 +276,15 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                     grad_acc.register_hook(self._make_hook(p))
                     self._grad_accs.append(grad_acc)
 
-    def _allreduce_grad_async(self, p):
+    def _communicate_grad_async(self, p):
         name = self._parameter_names.get(p)
         tensor = p.grad
-        tensor_compressed, ctx = self._compression.compress(tensor)
+        tensor = self.compressor.memory_compensate(tensor, name)
+        tensors_compressed, ctx = self.compressor.compress(tensor, name)
+        self.compressor.memory_update(tensor, name, tensors_compressed, ctx)
 
-        handle = allreduce_async_(tensor_compressed, average=True, name=name)
-        return handle, ctx
+        handles = self.communication.async_send(tensors_compressed, name)
+        return handles, ctx
 
     def _make_hook(self, p):
         def hook(*ignore):
@@ -138,25 +300,26 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             handle, ctx = None, None
             self._allreduce_delay[p] -= 1
             if self._allreduce_delay[p] == 0:
-                handle, ctx = self._allreduce_grad_async(p)
+                handle, ctx = self._communicate_grad_async(p)
             self._handles[p] = (handle, ctx)
+
         return hook
 
     def synchronize(self):
         missing_p = self._requires_update - set(self._handles.keys())
         for p in missing_p:
-            handle, ctx = self._allreduce_grad_async(p)
-            self._handles[p] = (handle, ctx)
+            self._handles[p] = self._communicate_grad_async(p)
 
         for p, value in self._handles.items():
-            handle, ctx = value
-            if handle is None:
-                handle, ctx = self._allreduce_grad_async(p)
-                self._handles[p] = (handle, ctx)
-        for p, (handle, _) in self._handles.items():
-            output = synchronize(handle)
+            handles, ctx = value
+            if handles is None:
+                handles, ctx = self._communicate_grad_async(p)
+                self._handles[p] = (handles, ctx)
+        for p, value in self._handles.items():
+            handles, ctx = value
+            tensor = self.communication.wait_receive(handles, ctx)
             self._allreduce_delay[p] = self.backward_passes_per_step
-            p.grad.set_(self._compression.decompress(output, ctx))
+            p.grad.set_(tensor)
         self._handles.clear()
 
         self._synchronized = True
@@ -203,7 +366,8 @@ class _DistributedOptimizer(torch.optim.Optimizer):
 
 
 def DistributedOptimizer(optimizer, named_parameters=None,
-                         compression=Compression.none,
+                         compressor=None,
+                         communication='allreduce',
                          backward_passes_per_step=1):
     """
     An optimizer that wraps another torch.optim.Optimizer, using an allreduce to
@@ -234,10 +398,11 @@ def DistributedOptimizer(optimizer, named_parameters=None,
     Arguments:
         optimizer: Optimizer to use for computing gradients and applying updates.
         named_parameters: A mapping between parameter names and values. Used for naming of
-                          allreduce operations. Typically just ``model.named_parameters()``.
-        compression: Compression algorithm used during allreduce to reduce the amount
+                          allreduce operations. Typically just `model.named_parameters()`.
+        compressor: Compression algorithm used during allreduce to reduce the amount
                      of data sent during the each parameter update step.  Defaults to
                      not using compression.
+        communication: 'allgather', 'broadcast', 'allreduce'
         backward_passes_per_step: Number of expected backward passes to perform
                                   before calling step()/synchronize(). This
                                   allows accumulating gradients over multiple
@@ -249,7 +414,7 @@ def DistributedOptimizer(optimizer, named_parameters=None,
     cls = type(optimizer.__class__.__name__, (optimizer.__class__,),
                dict(_DistributedOptimizer.__dict__))
     return cls(optimizer.param_groups, named_parameters,
-               compression, backward_passes_per_step)
+               compressor, communication, backward_passes_per_step)
 
 
 def broadcast_parameters(params, root_rank):
@@ -352,11 +517,13 @@ def broadcast_optimizer_state(optimizer, root_rank):
     def _create_callback(pid, name, t, p):
         def _from_tensor():
             state_dict['state'][pid][name] = t(p.cpu().numpy()[0])
+
         return _from_tensor
 
     def _create_option_callback(index, option_key, option_tensor, dtypes):
         def _from_tensor():
             optimizer.param_groups[index][option_key] = _recursive_cast(option_tensor.cpu().numpy()[0], dtypes)
+
         return _from_tensor
 
     # Param groups are an ordered list, normally there is only one per model,

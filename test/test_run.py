@@ -18,15 +18,19 @@ from __future__ import division
 from __future__ import print_function
 
 import contextlib
+import copy
 import os
 import sys
 import unittest
 import warnings
 
 import pytest
+from mock import MagicMock
 
-from horovod.run import run
-from horovod.run.common.util import config_parser
+from horovod.run.common.util import config_parser, secret, settings as hvd_settings, timeout
+from horovod.run.common.util.host_hash import _hash, host_hash
+from horovod.run.mpi_run import _get_mpi_implementation_flags, _LARGE_CLUSTER_THRESHOLD as large_cluster_threshold, mpi_run
+from horovod.run.run import parse_args
 
 
 @contextlib.contextmanager
@@ -39,6 +43,17 @@ def override_args(tool=None, *args):
         yield
     finally:
         sys.argv = old
+
+
+@contextlib.contextmanager
+def override_env(env):
+    old = os.environ.copy()
+    try:
+        os.environ.update(env)
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old)
 
 
 class RunTests(unittest.TestCase):
@@ -57,7 +72,7 @@ class RunTests(unittest.TestCase):
                            '--cache-capacity', '512',
                            '--hierarchical-allreduce',
                            '--hierarchical-allgather'):
-            args = run.parse_args()
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
@@ -75,7 +90,7 @@ class RunTests(unittest.TestCase):
                            '--autotune-steps-per-sample', '5',
                            '--autotune-bayes-opt-max-samples', '10',
                            '--autotune-gaussian-process-noise', '0.2'):
-            args = run.parse_args()
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
@@ -91,7 +106,7 @@ class RunTests(unittest.TestCase):
                            '--autotune',
                            '--cache-capacity', '1024',
                            '--no-hierarchical-allgather'):
-            args = run.parse_args()
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
@@ -105,7 +120,7 @@ class RunTests(unittest.TestCase):
         with override_args('horovodrun', '-np', '2',
                            '--timeline-filename', '/tmp/timeline.json',
                            '--timeline-mark-cycles'):
-            args = run.parse_args()
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
@@ -115,7 +130,7 @@ class RunTests(unittest.TestCase):
     def test_stall_check_args(self):
         with override_args('horovodrun', '-np', '2',
                            '--no-stall-check'):
-            args = run.parse_args()
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
@@ -124,7 +139,7 @@ class RunTests(unittest.TestCase):
         with override_args('horovodrun', '-np', '2',
                            '--stall-check-warning-time-seconds', '10',
                            '--stall-check-shutdown-time-seconds', '20'):
-            args = run.parse_args()
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
@@ -136,20 +151,22 @@ class RunTests(unittest.TestCase):
         with override_args('horovodrun', '-np', '2',
                            '--mpi-threads-disable',
                            '--num-nccl-streams', '2',
-                           '--mlsl-bgt-affinity', '1'):
-            args = run.parse_args()
+                           '--mlsl-bgt-affinity', '1',
+                           '--gloo-timeout-seconds', '60'):
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
             self.assertEqual(env.get(config_parser.HOROVOD_MPI_THREADS_DISABLE), '1')
             self.assertEqual(env.get(config_parser.HOROVOD_NUM_NCCL_STREAMS), '2')
             self.assertEqual(env.get(config_parser.HOROVOD_MLSL_BGT_AFFINITY), '1')
+            self.assertEqual(env.get(config_parser.HOROVOD_GLOO_TIMEOUT_SECONDS), '60')
 
     def test_logging_args(self):
         with override_args('horovodrun', '-np', '2',
                            '--log-level', 'INFO',
                            '--log-hide-timestamp'):
-            args = run.parse_args()
+            args = parse_args()
             env = {}
             config_parser.set_env_from_args(env, args)
 
@@ -160,7 +177,7 @@ class RunTests(unittest.TestCase):
         config_filename = os.path.join(os.path.dirname(__file__), 'data/config.test.yaml')
         with override_args('horovodrun', '-np', '2',
                            '--config-file', config_filename):
-            args = run.parse_args()
+            args = parse_args()
 
             self.assertTrue(args.use_gloo)
 
@@ -192,6 +209,7 @@ class RunTests(unittest.TestCase):
             self.assertTrue(args.mpi_threads_disable)
             self.assertEqual(args.num_nccl_streams, 2)
             self.assertEqual(args.mlsl_bgt_affinity, 1)
+            self.assertEqual(args.gloo_timeout_seconds, 60)
 
             # Logging
             self.assertEqual(args.log_level, 'INFO')
@@ -203,7 +221,7 @@ class RunTests(unittest.TestCase):
                            '--fusion-threshold-mb', '128',
                            '--config-file', config_filename,
                            '--cycle-time-ms', '20',):
-            args = run.parse_args()
+            args = parse_args()
             self.assertEqual(args.fusion_threshold_mb, 128)
             self.assertEqual(args.cycle_time_ms, 20)
 
@@ -211,4 +229,133 @@ class RunTests(unittest.TestCase):
         with override_args('horovodrun', '-np', '2',
                            '--fusion-threshold-mb', '-1'):
             with pytest.raises(ValueError):
-                run.parse_args()
+                parse_args()
+
+    def test_hash(self):
+        hash = _hash("test string")
+        self.assertEqual(hash, '6f8db599de986fab7a21625b7916589c')
+
+    def test_host_hash(self):
+        hash = host_hash()
+        # host_hash should consider CONTAINER_ID environment variable
+        with override_env({'CONTAINER_ID': 'a container id'}):
+            self.assertNotEqual(host_hash(), hash)
+        self.assertEqual(host_hash(), hash)
+
+    """
+    Minimal mpi_run settings for tests.
+    """
+    minimal_settings = hvd_settings.Settings(
+        verbose=0,
+        num_hosts=1,
+        num_proc=2,
+        hosts='host',
+        run_func_mode=True
+    )
+
+    """
+    Tests mpi_run with minimal settings.
+    """
+    def test_mpi_run_minimal(self):
+        if _get_mpi_implementation_flags() is None:
+            self.skipTest("MPI is not available")
+
+        cmd = ['cmd']
+        settings = self.minimal_settings
+        run_func = MagicMock(return_value=0)
+
+        mpi_run(settings, None, {}, cmd, run_func=run_func)
+
+        mpi_flags = _get_mpi_implementation_flags()
+        self.assertIsNotNone(mpi_flags)
+        expected_cmd = ('mpirun '
+                        '--allow-run-as-root --tag-output '
+                        '-np 2 -H host '
+                        '-bind-to none -map-by slot '
+                        '{mpi_flags}       '
+                        'cmd').format(mpi_flags=' '.join(mpi_flags))
+        expected_env = {}
+        run_func.assert_called_once_with(command=expected_cmd, env=expected_env, stdout=None, stderr=None)
+
+    """
+    Tests mpi_run on a large cluster.
+    """
+    def test_mpi_run_on_large_cluster(self):
+        if _get_mpi_implementation_flags() is None:
+            self.skipTest("MPI is not available")
+
+        cmd = ['cmd']
+        settings = copy.copy(self.minimal_settings)
+        settings.num_hosts = large_cluster_threshold
+        run_func = MagicMock(return_value=0)
+
+        mpi_run(settings, None, {}, cmd, run_func=run_func)
+
+        mpi_flags = _get_mpi_implementation_flags()
+        self.assertIsNotNone(mpi_flags)
+        mpi_flags.append('-mca plm_rsh_no_tree_spawn true')
+        mpi_flags.append('-mca plm_rsh_num_concurrent 2')
+        expected_cmd = ('mpirun '
+                        '--allow-run-as-root --tag-output '
+                        '-np 2 -H host '
+                        '-bind-to none -map-by slot '
+                        '{mpi_flags}       '
+                        'cmd').format(mpi_flags=' '.join(mpi_flags))
+        expected_env = {}
+        run_func.assert_called_once_with(command=expected_cmd, env=expected_env, stdout=None, stderr=None)
+
+    """
+    Tests mpi_run with full settings.
+    """
+    def test_mpi_run_full(self):
+        if _get_mpi_implementation_flags() is None:
+            self.skipTest("MPI is not available")
+
+        cmd = ['cmd', 'arg1', 'arg2']
+        common_intfs = ['eth0', 'eth1']
+        env = {'env1': 'val1', 'env2': 'val2'}
+        stdout = '<stdout>'
+        stderr = '<stderr>'
+        tmout = timeout.Timeout(5, message='Timed out waiting for something.')
+        settings = hvd_settings.Settings(
+            verbose=0,
+            ssh_port=1022,
+            extra_mpi_args='>mpi-extra args go here<',
+            key=secret.make_secret_key(),
+            timeout=tmout,
+            num_hosts=1,
+            num_proc=1,
+            hosts='>host names go here<',
+            output_filename='>output filename goes here<',
+            run_func_mode=True
+        )
+        run_func = MagicMock(return_value=0)
+
+        mpi_run(settings, common_intfs, env, cmd, stdout=stdout, stderr=stderr, run_func=run_func)
+
+        mpi_flags = _get_mpi_implementation_flags()
+        self.assertIsNotNone(mpi_flags)
+        expected_command = ('mpirun '
+                            '--allow-run-as-root --tag-output '
+                            '-np 1 -H >host names go here< '
+                            '-bind-to none -map-by slot '
+                            '{mpi_flags} '
+                            '-mca plm_rsh_args "-p 1022" '
+                            '-mca btl_tcp_if_include eth0,eth1 -x NCCL_SOCKET_IFNAME=eth0,eth1 '
+                            '--output-filename >output filename goes here< '
+                            '-x env1 -x env2 '
+                            '>mpi-extra args go here< '
+                            'cmd arg1 arg2').format(mpi_flags=' '.join(mpi_flags))
+        expected_env = {'env1': 'val1', 'env2': 'val2'}
+        run_func.assert_called_once_with(command=expected_command, env=expected_env, stdout=stdout, stderr=stderr)
+
+    def test_mpi_run_with_non_zero_exit(self):
+        if _get_mpi_implementation_flags() is None:
+            self.skipTest("MPI is not available")
+
+        cmd = ['cmd']
+        settings = self.minimal_settings
+        run_func = MagicMock(return_value=1)
+
+        with pytest.raises(RuntimeError, match="^mpirun failed with exit code 1$") as e:
+            mpi_run(settings, None, {}, cmd, run_func=run_func)
