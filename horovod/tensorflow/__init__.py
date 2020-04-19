@@ -66,7 +66,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     params_env = {
         "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
         "comm_method": os.environ.get('HOROVOD_COMM_METHOD', 'allreduce'),
-        "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
+        "use_memory": strtobool(os.environ.get('HOROVOD_COMPRESS_MEMORY', "False")),
         "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
         "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
         "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
@@ -81,9 +81,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
         'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2)),
         'error_bound': float(os.environ.get('HOROVOD_ERROR_BOUND', 2e-10)),  # typical values: 2e-10, 2e-8, 2e-6
-        'bloom_fpr': float(os.environ.get('HOROVOD_FALSE_POSITIVE_RATE', 0.01)),
+        'bloom_fpr': float(os.environ.get('HOROVOD_BLOOM_FPR', 0.01)),
         'bloom_policy': os.environ.get('HOROVOD_BLOOM_POLICY', "conflict_sets"),
-        'bloom_false_positives_aware': bool(strtobool(os.environ.get('HOROVOD_FALSE_POSITIVES_AWARE', "True"))),
+        'bloom_false_positives_aware': bool(strtobool(os.environ.get('HOROVOD_BLOOM_FALSE_POSITIVES_AWARE', 'True'))),
         'bloom_verbosity_frequency': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY_FREQUENCY', 0)),
         'bloom_verbosity': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY', 0)),
         'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
