@@ -118,54 +118,6 @@ public:
             fprintf(f, "Values: %s\n", values.DebugString(K).c_str());
             fprintf(f, "\nIndices: %s\n\n", indices.DebugString(K).c_str());
             fprintf(f, "Step: = %d\n\n", step);
-
-/*
-        if (policy == "conflict_sets") {
-            std::map<int, std::vector<int>> conflict_sets;
-            Policies::build_conflict_sets(N, bloom, conflict_sets);
-            fprintf(f, "\nConflict Sets Map:\n");
-            print_map(conflict_sets, f);
-            std::vector<std::vector<int>> conflict_sets_ordered;
-            conflict_sets_ordered.resize(conflict_sets.size());
-            Policies::transform_and_sort(conflict_sets, conflict_sets_ordered);
-            fprintf(f, "\nConflict Sets Ordered:\n");
-            print_2d_vector(conflict_sets_ordered, f);
-            std::vector<int> tmp;
-//            Policies::choose_indices_from_conflict_sets(K, step, conflict_sets_ordered, tmp);
-//std::default_random_engine generator;
-//generator.seed(step);
-//int random, idx, left = K;
-//while (left > 0) {                                      // Don't stop until you have selected K positives
-//    std::vector<int>& cset = conflict_sets_ordered[0];
-////    random = rand() % cset.size();    // choose randomly an element from the set
-//    std::uniform_real_distribution<float> distribution(0, cset.size()-1);
-//    random = distribution(generator);
-//    fprintf(f, "Random: %d\n", random);
-//
-//    idx = cset[random];
-//    tmp.push_back(idx);
-//    left--;
-//    // Search the item in all the other conflicts sets and erase it
-//    // Then move those conflicts sets at the end of the vector
-//    int size = conflict_sets_ordered.size();
-//    for (int i=0; i<size; i++) {
-//        std::vector<int>& cs = conflict_sets_ordered[i];
-//        auto it = std::find(cs.begin(), cs.end(), idx);
-//        if (it != cs.end()) {
-//            cs.erase(it);
-//            if (cs.size()) {
-//                conflict_sets_ordered.push_back(cs);
-//            }
-//            conflict_sets_ordered.erase(conflict_sets_ordered.begin()+i);
-//            i--;
-//        }
-//    }
-//}
-//            fprintf(f, "\nConflict Sets Ordered After Selection:\n");
-            print_2d_vector(conflict_sets_ordered, f);
-        }
-        print_vector(selected_indices.data(), K, f);
-*/
             fprintf(f, "Bloom size: = %d\n", bloom_size);
             bloom.fprint(f);
             fprintf(f, "\nIndices Chosen:");

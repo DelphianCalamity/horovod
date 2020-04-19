@@ -87,7 +87,6 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'bloom_verbosity_frequency': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY_FREQUENCY', 0)),
         'bloom_verbosity': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY', 0)),
         'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
-        'bloom_logs_path_suffix': os.environ.get('HOROVOD_BLOOM_LOGS_PATH_SUFFIX', 0),
     }
     if params is not None:
         for argument in params_env:
