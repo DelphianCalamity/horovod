@@ -5,8 +5,6 @@
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
-#include "../../third_party/bloomfilter/inc/FnvHash.hpp"
-#include "../../third_party/bloomfilter/inc/MurmurHash.hpp"
 #include "./policies.hpp"
 #include "./compression_utils.hpp"
 
@@ -24,13 +22,15 @@ REGISTER_OP("BloomCompressor")
 .Attr("policy: string")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
-.Attr("logfile_suffix: int")       // For debugging
-.Attr("logs_path_suffix: int")     // For debugging
-.Attr("verbosity: int")            // For debugging
+.Attr("bloom_logs_path: string")
+.Attr("gradient_id: int")
+.Attr("rank: int")
+.Attr("verbosity_frequency: int")
+.Attr("verbosity: int")
 .Input("values: T")
 .Input("indices: int32")
-.Input("initial_tensor: int32")    // For debugging
-.Input("step: int64")              // For debugging
+.Input("initial_tensor: int32")
+.Input("step: int64")
 .Output("compressed_tensor: int8")
 .Doc(R"doc()doc");
 
@@ -39,13 +39,15 @@ REGISTER_OP("BloomDecompressor")
 .Attr("mem_mode: int")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
-.Attr("logfile_suffix: int")            // For debugging
-.Attr("logs_path_suffix: int")          // For debugging
-.Attr("suffix: int")                    // For debugging
-.Attr("verbosity: int")                 // For debugging
+.Attr("bloom_logs_path: string")
+.Attr("gradient_id: int")
+.Attr("rank: int")
+.Attr("suffix: int")
+.Attr("verbosity_frequency: int")
+.Attr("verbosity: int")
 .Input("compressed_tensor: int8")
 .Input("decompressed_size: int32")
-.Input("step: int64")                   // For debugging
+.Input("step: int64")
 .Output("decompressed_tensor: int32")
 .Doc(R"doc()doc");
 
@@ -58,9 +60,11 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("policy", &policy));
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
-        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
-        OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
-        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("bloom_logs_path", &bloom_logs_path));
+        OP_REQUIRES_OK(context, context->GetAttr("gradient_id", &gradient_id));
+        OP_REQUIRES_OK(context, context->GetAttr("rank", &rank));
+        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));
+        OP_REQUIRES_OK(context, context->GetAttr("verbosity_frequency", &verbosity_frequency));
     }
 
     void Compute(OpKernelContext *context) override {
@@ -111,26 +115,28 @@ public:
         }
 
         // *********************** For Debugging ********************** //
-        if (verbosity != 0 && step % verbosity == 0 ) {
+        if (verbosity_frequency != 0 && step % verbosity_frequency == 0 ) {
             if (!false_positives_aware) {
                 // Select Indices using a Policy
                 Policies::select_indices(policy, N, K, step, bloom, selected_indices);
             }
             CompressionUtilities::logging_compressor(bloom, N, K, output_concat_dim, initial_tensor, indices, values,
-                                            new_values, selected_indices, logfile_suffix, logs_path_suffix, step, policy);
+                            new_values, selected_indices, bloom_logs_path, gradient_id, step, policy, rank, verbosity);
         }
         // *********************** For Debugging ********************** //
-
     }
 
 private:
-    bool false_positives_aware;
-    string policy;
     int hash_num;
     int bloom_size;
-    int logfile_suffix;     // For debugging
-    int logs_path_suffix;   // For debugging
-    int verbosity;          // For debugging
+    string policy;
+    bool false_positives_aware;
+    // Logging
+    string bloom_logs_path;
+    int gradient_id;
+    int rank;
+    int verbosity_frequency;
+    int verbosity;
 };
 
 class BloomDecompressorOp : public OpKernel {
@@ -142,10 +148,12 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("mem_mode", &mem_mode));
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
-        OP_REQUIRES_OK(context, context->GetAttr("logfile_suffix", &logfile_suffix));       // For debugging
-        OP_REQUIRES_OK(context, context->GetAttr("logs_path_suffix", &logs_path_suffix));   // For debugging
-        OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));                       // For debugging
-        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));                 // For debugging
+        OP_REQUIRES_OK(context, context->GetAttr("bloom_logs_path", &bloom_logs_path));
+        OP_REQUIRES_OK(context, context->GetAttr("gradient_id", &gradient_id));
+        OP_REQUIRES_OK(context, context->GetAttr("rank", &rank));
+        OP_REQUIRES_OK(context, context->GetAttr("suffix", &suffix));
+        OP_REQUIRES_OK(context, context->GetAttr("verbosity", &verbosity));
+        OP_REQUIRES_OK(context, context->GetAttr("verbosity_frequency", &verbosity_frequency));
     }
 
     void Compute(OpKernelContext *context) override {
@@ -183,9 +191,9 @@ public:
         }
 
         // *********************** For Debugging ********************** //
-        if (verbosity != 0 && step % verbosity == 0 && mem_mode == 0) {
-            CompressionUtilities::logging_decompressor(bloom, N, K, values_vec, selected_indices, logfile_suffix,
-                                logs_path_suffix, suffix, step, decompressed_tensor, policy);
+        if (verbosity_frequency != 0 && step % verbosity_frequency == 0 && mem_mode == 0) {
+            CompressionUtilities::logging_decompressor(bloom, N, K, values_vec, selected_indices, bloom_logs_path,
+                                gradient_id, suffix, step, decompressed_tensor, policy, rank, verbosity);
         }
         // *********************** For Debugging ********************** //
 
@@ -197,10 +205,13 @@ private:
     int mem_mode;
     int hash_num;
     int bloom_size;
-    int logfile_suffix;     // For debugging
-    int logs_path_suffix;   // For debugging
-    int suffix;             // For debugging
-    int verbosity;          // For debugging
+    // Logging
+    string bloom_logs_path;
+    int gradient_id;
+    int rank;
+    int suffix;
+    int verbosity_frequency;
+    int verbosity;
 };
 
 REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_CPU), BloomCompressorOp);

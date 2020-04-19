@@ -94,18 +94,18 @@ public:
 
     static void logging_compressor(bloom::OrdinaryBloomFilter<uint32_t>& bloom, int N, int K, int output_concat_dim,
     const Tensor& initial_tensor, const Tensor& indices, const Tensor& values, std::vector<int>& new_values, std::vector<int>& selected_indices,
-    int logfile_suffix, int logs_path_suffix, int64 step, std::string policy, int rank, int verbosity) {
+    string bloom_logs_path, int gradient_id, int64 step, std::string policy, int rank, int verbosity) {
 
         FILE* f;
         std::string str;
         int false_positives = bloom.Compute_False_Positives(N, indices);
         int policy_errors = Policies::get_policy_errors(K, indices, selected_indices);
-        std::string suffix = std::to_string(logfile_suffix);
-        std::string logs_suffix = std::to_string(logs_path_suffix);
+        std::string str_gradient_id = std::to_string(gradient_id);
         std::string str_step = std::to_string(step);
         std::string str_rank = std::to_string(rank);
+        int bloom_size = bloom.Get_numBytes();
 
-        std::string path = "logs" + logs_suffix + "/" + str_rank + "/step_" + str_step + "/" + suffix + "/";
+        std::string path = bloom_logs_path + "/" + str_rank + "/step_" + str_step + "/" + str_gradient_id + "/";
         std::string cmd = "mkdir -p " + path;
 
         if (verbosity > 1) {
@@ -162,7 +162,6 @@ public:
         }
         print_vector(selected_indices.data(), K, f);
 */
-            int bloom_size = bloom.Get_numBytes();
             fprintf(f, "Bloom size: = %d\n", bloom_size);
             bloom.fprint(f);
             fprintf(f, "\nIndices Chosen:");
@@ -195,16 +194,15 @@ public:
     }
 
     static void logging_decompressor(bloom::OrdinaryBloomFilter<uint32_t>& bloom, int N, int K,
-    int* values_vec, std::vector<int>& selected_indices, int logfile_suffix, int logs_path_suffix,
-    int suffix, int64 step, Tensor* decompressed_tensor, std::string policy, , int rank, int verbosity) {
+    int* values_vec, std::vector<int>& selected_indices, string bloom_logs_path, int gradient_id,
+    int suffix, int64 step, Tensor* decompressed_tensor, std::string policy, int rank, int verbosity) {
 
         FILE* f;
-        std::string str_suffix = std::to_string(logfile_suffix);
-        std::string logs_suffix = std::to_string(logs_path_suffix);
+        std::string str_gradient_id = std::to_string(gradient_id);
         std::string str_step = std::to_string(step);
         std::string str_rank = std::to_string(rank);
 
-        std::string path = "logs" + logs_suffix + "/" + str_rank + "/step_" + str_step + "/" + str_suffix;
+        std::string path = bloom_logs_path + "/" + str_rank + "/step_" + str_step + "/" + str_gradient_id;
         std::string str = path + "/decompressor_logs_" + policy + "_" + std::to_string(suffix) + ".txt";
         f = fopen(str.c_str(),"w");
         fprintf(f, "decompressed size: %d\n\n", N);

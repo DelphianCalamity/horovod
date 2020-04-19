@@ -81,6 +81,13 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
         'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2)),
         'error_bound': float(os.environ.get('HOROVOD_ERROR_BOUND', 2e-10)),  # typical values: 2e-10, 2e-8, 2e-6
+        'bloom_fpr': float(os.environ.get('HOROVOD_FALSE_POSITIVE_RATE', 0.01)),
+        'bloom_policy': os.environ.get('HOROVOD_BLOOM_POLICY', "conflict_sets"),
+        'bloom_false_positives_aware': strtobool(os.environ.get('HOROVOD_FALSE_POSITIVES_AWARE', "True")),
+        'bloom_verbosity_frequency': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY_FREQUENCY', 0)),
+        'bloom_verbosity': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY', 0)),
+        'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
+        'bloom_logs_path_suffix': os.environ.get('HOROVOD_BLOOM_LOGS_PATH_SUFFIX', 0),
     }
     if params is not None:
         for argument in params_env:
@@ -287,6 +294,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                 list_tensor_compressed = communicate[comm_method](tensor_compressed)
                 list_tensor_decompressed = []
                 for ranki in range(size()):
+                    params['suffix'] = ranki
                     if len(list_tensor_compressed[ranki]) == 1:
                         temp = list_tensor_compressed[ranki][0]
                     else:
@@ -295,7 +303,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
                         compression.decompress(temp, ctx, params))
 
                 new_tensor = compression.aggregate(list_tensor_decompressed, params)
-
+                params['suffix'] = 0
             for op in memory_update_op:
                 new_tensor = new_tensor + op - op
         return new_tensor
@@ -431,7 +439,7 @@ def _make_allreduce_grads_fn(name, device_dense, device_sparse,
             all_reduce_list = []
             for i, grad in enumerate(grads):
 
-                params['logfile_suffix'] = i
+                params['gradient_id'] = i
 
                 if grad is not None:
                     all_reduce_list.append(allreduce(grad,

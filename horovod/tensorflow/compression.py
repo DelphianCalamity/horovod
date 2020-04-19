@@ -298,11 +298,11 @@ class Bloom_Filter_Compressor(Compressor):
         k = max(1, int(elemnum * compress_ratio))
 
         # Configure bloom filter's m, k values
-        assert params["fpr"] is not None, "False Positive Rate is None"
-        params['m'], params['k'] = Bloom_Filter_Compressor.bloom_configuration(k, params["fpr"])
+        assert params["bloom_fpr"] is not None, "False Positive Rate is None"
+        params['m'], params['k'] = Bloom_Filter_Compressor.bloom_configuration(k, params["bloom_fpr"])
         assert params['k'] < 256, "Number of hash functions too big"
 
-        params["bloom_config"].add_data(k, params['m']*8, params['k'], params["fpr"])
+        params["bloom_config"].add_data(k, params['m']*8, params['k'], params["bloom_fpr"])
         params["throughput_info"].add_data(elemnum, elemnum/8,  params['m']*8, (params['m']*8)/8, elemnum-params['m']*8, (elemnum-params['m']*8)/8)
 
         # Topk Sparcification Method
@@ -317,13 +317,15 @@ class Bloom_Filter_Compressor(Compressor):
 
         log_initial_tensor = tf.bitcast(tensor_flatten, tf.int32)
         compressed_tensor = bloom_compressor(values, indices, log_initial_tensor, tf.train.get_or_create_global_step(),
-                                             false_positives_aware=params['false_positives_aware'],
-                                             policy=params['policy'],
+                                             false_positives_aware=params['bloom_false_positives_aware'],
+                                             policy=params['bloom_policy'],
                                              hash_num=params['k'],
                                              bloom_size=params['m'],
-                                             logfile_suffix=params['logfile_suffix'],
-                                             logs_path_suffix=params['logs_path_suffix'],
-                                             verbosity=params['verbosity'])
+                                             bloom_logs_path=params['bloom_logs_path'],
+                                             gradient_id=params['gradient_id'],
+                                             verbosity_frequency=params['bloom_verbosity_frequency'],
+                                             verbosity=params['bloom_verbosity'],
+                                             rank=rank())
         ctx = tensor_shape
         params['tensors_size_are_same'] = True
         return compressed_tensor, ctx
@@ -340,14 +342,16 @@ class Bloom_Filter_Compressor(Compressor):
 
         decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
                                                  tf.train.get_or_create_global_step(),
-                                                 policy=params['policy'],
+                                                 policy=params['bloom_policy'],
                                                  mem_mode=params['mem_mode'],
                                                  hash_num=params['k'],
                                                  bloom_size=params['m'],
-                                                 logfile_suffix=params['logfile_suffix'],
-                                                 logs_path_suffix=params['logs_path_suffix'],
+                                                 bloom_logs_path=params['bloom_logs_path'],
+                                                 gradient_id=params['gradient_id'],
+                                                 verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                 verbosity=params['bloom_verbosity'],
                                                  suffix=params['suffix'],
-                                                 verbosity=params['verbosity'])
+                                                 rank=rank())
 
         decompressed_tensor = tf.bitcast(decompressed_tensor, tf.float32)
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
