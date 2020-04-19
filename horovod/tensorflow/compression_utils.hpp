@@ -107,7 +107,10 @@ public:
 
         std::string path = bloom_logs_path + "/" + str_rank + "/step_" + str_step + "/" + str_gradient_id + "/";
         std::string cmd = "mkdir -p " + path;
-
+        int systemRet = system(cmd.c_str());
+        if(systemRet == -1){
+            perror("mkdir failed");
+        }
         if (verbosity > 1) {
             str = path + "compressor_logs_" + policy + ".txt";
             f = fopen(str.c_str(),"w");
@@ -115,6 +118,7 @@ public:
             fprintf(f, "Values: %s\n", values.DebugString(K).c_str());
             fprintf(f, "\nIndices: %s\n\n", indices.DebugString(K).c_str());
             fprintf(f, "Step: = %d\n\n", step);
+
 /*
         if (policy == "conflict_sets") {
             std::map<int, std::vector<int>> conflict_sets;
@@ -181,12 +185,10 @@ public:
         f = fopen(str.c_str(),"w");
         fprintf(f, "FalsePositives: %d  Total: %d\n", false_positives,  N);
         fclose(f);
-
         str = path + "policy_errors.txt";
         f = fopen(str.c_str(),"w");
         fprintf(f, "PolicyErrors: %d  Total: %d\n", policy_errors,  K);
         fclose(f);
-
         str = path + "stats.txt";
         f = fopen(str.c_str(),"w");
         fprintf(f, "Initial_Size: %d  Final_Size: %d\n", N /*in bits*/,  bloom_size*8 /*in bits*/);
@@ -196,19 +198,18 @@ public:
     static void logging_decompressor(bloom::OrdinaryBloomFilter<uint32_t>& bloom, int N, int K,
     int* values_vec, std::vector<int>& selected_indices, string bloom_logs_path, int gradient_id,
     int suffix, int64 step, Tensor* decompressed_tensor, std::string policy, int rank, int verbosity) {
-
-        FILE* f;
-        std::string str_gradient_id = std::to_string(gradient_id);
-        std::string str_step = std::to_string(step);
-        std::string str_rank = std::to_string(rank);
-
-        std::string path = bloom_logs_path + "/" + str_rank + "/step_" + str_step + "/" + str_gradient_id;
-        std::string str = path + "/decompressor_logs_" + policy + "_" + std::to_string(suffix) + ".txt";
-        f = fopen(str.c_str(),"w");
-        fprintf(f, "decompressed size: %d\n\n", N);
-        fprintf(f, "Step: = %d\n\n", step);
-
         if (verbosity > 1) {
+            FILE* f;
+            std::string str_gradient_id = std::to_string(gradient_id);
+            std::string str_step = std::to_string(step);
+            std::string str_rank = std::to_string(rank);
+
+            std::string path = bloom_logs_path + "/" + str_rank + "/step_" + str_step + "/" + str_gradient_id;
+            std::string str = path + "/decompressor_logs_" + policy + "_" + std::to_string(suffix) + ".txt";
+            f = fopen(str.c_str(),"w");
+            fprintf(f, "decompressed size: %d\n\n", N);
+            fprintf(f, "Step: = %d\n\n", step);
+
             int bloom_size = bloom.Get_numBytes();
             fprintf(f, "Bloom size: = %d\n", bloom_size);
             bloom.fprint(f);
@@ -217,8 +218,8 @@ public:
             fprintf(f, "Values Received:"); print_vector(values_vec, K, f);
             fprintf(f, "Decompressed_tensor: %s\n", decompressed_tensor->DebugString(N).c_str());
             fprintf(f, "########################################################################################\n\n");
+            fclose (f);
         }
-        fclose (f);
     }
 
 };

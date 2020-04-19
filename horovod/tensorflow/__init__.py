@@ -83,7 +83,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'error_bound': float(os.environ.get('HOROVOD_ERROR_BOUND', 2e-10)),  # typical values: 2e-10, 2e-8, 2e-6
         'bloom_fpr': float(os.environ.get('HOROVOD_FALSE_POSITIVE_RATE', 0.01)),
         'bloom_policy': os.environ.get('HOROVOD_BLOOM_POLICY', "conflict_sets"),
-        'bloom_false_positives_aware': strtobool(os.environ.get('HOROVOD_FALSE_POSITIVES_AWARE', "True")),
+        'bloom_false_positives_aware': bool(strtobool(os.environ.get('HOROVOD_FALSE_POSITIVES_AWARE', "True"))),
         'bloom_verbosity_frequency': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY_FREQUENCY', 0)),
         'bloom_verbosity': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY', 0)),
         'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
@@ -171,8 +171,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     # if params['compression_device'] =='':
     #     params['compression_device'] = device_dense
 
-    # print("========================== print params ====================================")
-    # print(params)
+    print("========================== print params ====================================")
+    print(params)
     if isinstance(tensor, tf.IndexedSlices):
         print("=====this model contains sparse gradient")
         with tf.device(device_sparse):
