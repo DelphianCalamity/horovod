@@ -94,7 +94,7 @@ public:
 
     static void logging_compressor(bloom::OrdinaryBloomFilter<uint32_t>& bloom, int N, int K, int output_concat_dim,
     const Tensor& initial_tensor, const Tensor& indices, const Tensor& values, std::vector<int>& new_values, std::vector<int>& selected_indices,
-    string bloom_logs_path, int gradient_id, int64 step, std::string policy, int rank, int verbosity) {
+    std::string bloom_logs_path, int gradient_id, int64 step, std::string policy, int rank, int verbosity) {
 
         FILE* f;
         std::string str;
@@ -148,7 +148,7 @@ public:
     }
 
     static void logging_decompressor(bloom::OrdinaryBloomFilter<uint32_t>& bloom, int N, int K,
-    int* values_vec, std::vector<int>& selected_indices, string bloom_logs_path, int gradient_id,
+    int* values_vec, std::vector<int>& selected_indices, std::string bloom_logs_path, int gradient_id,
     int suffix, int64 step, Tensor* decompressed_tensor, std::string policy, int rank, int verbosity) {
         if (verbosity > 1) {
             FILE* f;
