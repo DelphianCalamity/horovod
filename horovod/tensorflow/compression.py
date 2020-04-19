@@ -287,7 +287,6 @@ class Bloom_Filter_Compressor(Compressor):
         h = int(math.ceil(h))
         return m, h
 
-
     @staticmethod
     def compress(tensor, params):
 

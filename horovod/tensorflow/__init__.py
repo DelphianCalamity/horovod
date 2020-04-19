@@ -40,10 +40,8 @@ import math
 import json
 import os
 
-def allreduce(tensor, average=True, device_dense='', device_sparse='',
-                   compression=Compression.none,
-                   params=None,
-                   ):
+# explicitly pass compression=Compression.none to disable compression when environment variables are set
+def allreduce(tensor, average=True, device_dense='', device_sparse='', compression=None, params=None):
     """Perform an allreduce on a tf.Tensor or tf.IndexedSlices.
 
     Arguments:
@@ -64,6 +62,35 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
     allgather on the values and the indices, effectively doing an allreduce on
     the represented tensor.
     """
+
+    params_env = {
+        "compress_method": os.environ.get('HOROVOD_COMPRESS_METHOD', 'none'),
+        "comm_method": os.environ.get('HOROVOD_COMM_METHOD', 'allreduce'),
+        "use_memory": strtobool(os.environ.get('HOROVOD_USE_MEMORY', "False")),
+        "compress_ratio": float(os.environ.get('HOROVOD_COMPRESS_RATIO', 0.1)),
+        "threshold_val": float(os.environ.get('HOROVOD_THRESHOLD_VAL', 0.01)),
+        "quantum_num": int(os.environ.get('HOROVOD_QUANTUM_NUM', 256)),
+        "gradient_clipping": strtobool(os.environ.get('HOROVOD_GRADIENT_CLIPPING', "False")),
+        "momentum": float(os.environ.get('HOROVOD_MOMENTUM', 0.9)),
+        "learning_rate": float(os.environ.get('HOROVOD_INIT_LR', 0.1)),
+        "debug": strtobool(os.environ.get('HOROVOD_DEBUG', "False")),
+        "beta": float(os.environ.get('HOROVOD_MEMORY_BETA', 1.0)),
+        "gamma": float(os.environ.get('HOROVOD_MEMORY_GAMMA', 1.0)),
+        'model_name': os.environ.get('HOROVOD_MODEL_NAME', 'resnet20_v2'),
+        'compress_state': strtobool(os.environ.get('HOROVOD_COMPRESS_STATE', 'True')),
+        'memory_debug': strtobool(os.environ.get('HOROVOD_MEMORY_DEBUG', 'False')),
+        'compress_rank': int(os.environ.get('HOROVOD_COMPRESS_RANK', 2)),
+        'error_bound': float(os.environ.get('HOROVOD_ERROR_BOUND', 2e-10)),  # typical values: 2e-10, 2e-8, 2e-6
+    }
+    if params is not None:
+        for argument in params_env:
+            if argument not in params:
+                params[argument] = params_env[argument]
+    else:
+        params = params_env
+
+
+
 
     comp_dict = {}
     comp_dict["none"] = Compression.none
@@ -127,7 +154,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='',
         if argument not in params:
             params[argument] = default_params[argument]
 
-    params["compressor"] = comp_dict[params["compress_method"]]
+    params["compressor"] = compression if compression else comp_dict[params["compress_method"]]
     comm_method = params["comm_method"]
     horovod_size = tf.cast(params["horovod_size"], dtype=tensor.dtype)
     compression = params["compressor"]
@@ -440,7 +467,7 @@ if _LegacyOptimizer is not None:
         average gradient values before applying gradients to model weights."""
 
         def __init__(self, optimizer, name=None, use_locking=False, device_dense='',
-                    device_sparse='', compression=Compression.none,
+                    device_sparse='', compression=None,
                     sparse_as_dense=False, params=None):
             if name is None:
                 name = "Distributed{}".format(type(optimizer).__name__)
@@ -484,7 +511,7 @@ if _LegacyOptimizer is not None:
 
 
 def DistributedOptimizer(optimizer, name=None, use_locking=False, device_dense='',
-                         device_sparse='', compression=Compression.none,
+                         device_sparse='', compression=None,
                          sparse_as_dense=False, params=None):
     """Construct a new DistributedOptimizer, which uses another optimizer
     under the hood for computing single-process gradient values and
@@ -552,7 +579,7 @@ if hasattr(tf, 'GradientTape'):
 
 
     def DistributedGradientTape(gradtape, device_dense='', device_sparse='',
-                                compression=Compression.none, sparse_as_dense=False, params=None):
+                                compression=None, sparse_as_dense=False, params=None):
         """A tape that wraps another tf.GradientTape, using an allreduce to
         average gradient values before applying gradients to model weights.
         Args:
