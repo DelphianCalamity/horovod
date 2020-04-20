@@ -38,7 +38,7 @@ step=tf.placeholder(tf.int64, name='step')
 compressed_tensor = bloom_compressor(values, indices,
 									 log_init_tensor,
 									 step,
-									 false_positives_aware=False,
+									 false_positives_aware=True,
 									 policy=policy,
 									 hash_num=hash_num,
 									 bloom_size=bloom_size,
@@ -64,7 +64,6 @@ with tf.Session() as sess:
 	print("Initial Tensor: ", sess.run(init_tensor))
 	print("Values: ", sess.run(values))
 	print("Indices: ", sess.run(indices))
-
 	# sess.run(compressed_tensor, feed_dict={step:0})
 	# print("Compressed Tensor Shape: ", compressed_tensor.get_shape())
 	sess.run(decompressed_tensor, feed_dict={step:1})

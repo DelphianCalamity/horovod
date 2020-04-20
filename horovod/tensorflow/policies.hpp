@@ -72,7 +72,6 @@ public:
     }
 
     static void choose_indices_from_conflict_sets(int K, int seed, std::vector<std::vector<int>>& conflict_sets_ordered, std::vector<int>& selected_indices) {
-//        srand(seed);
         std::default_random_engine generator;
         generator.seed(seed);
 
@@ -81,7 +80,6 @@ public:
             std::vector<int>& cset = conflict_sets_ordered[0];
             std::uniform_int_distribution<int> distribution(0, cset.size()-1);
             random = distribution(generator);
-//            random = rand() % cset.size();    // choose randomly an element from the set
             idx = cset[random];
             selected_indices.push_back(idx);
             left--;

@@ -281,7 +281,7 @@ class Bloom_Filter_Compressor(Compressor):
         # Give bloom size in number of bytes ; bloom size must be a multiple of 8
         m = int(m/8)
         rem = m % 8
-        if rem != 0:
+        if rem != 0 or m == 0:
             m += 1
         h = (m*8 / k)*math.log(2)
         h = int(math.ceil(h))
