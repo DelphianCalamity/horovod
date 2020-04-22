@@ -95,28 +95,32 @@ public:
 //        printf("%d]\n\n", (int) vec[i]);
 //    }
 
-    static void erase_intersection(std::unordered_set<int>& a, std::unordered_set<int>& b) {
+    static int erase_intersection(std::unordered_set<int>& a, std::unordered_set<int>& b) {
+        bool compromised=false;
         std::unordered_set<int>::iterator it;
         for (it = a.begin(); it != a.end();) {
             if (b.find(*it) != b.end()) {
                 it = a.erase(it);
+                compromised = true;
             } else {
                 it++;
             }
         }
+        return compromised;
     }
 
     static void choose_indices_from_conflict_sets(int K, int seed, std::vector<std::unordered_set<int>>& conflict_sets_ordered, std::vector<int>& selected_indices) {
         std::default_random_engine generator;
         generator.seed(seed);
+        bool compromised;
         int random, left = K;
         std::unordered_set<int> selected_indices_set;
 //print_2d_vector(conflict_sets_ordered);
         while (left > 0) {             // Don't stop until you have selected K positives
             for (int i=0; i<conflict_sets_ordered.size() && left>0; i++) {
                 std::unordered_set<int>& cset = conflict_sets_ordered[i];
-                erase_intersection(cset, selected_indices_set);
-                if (cset.size() > 0) {
+                compromised = erase_intersection(cset, selected_indices_set);
+                if (!compromised && cset.size()>0) {
                     std::uniform_int_distribution<int> distribution(0, cset.size()-1);
                     random = distribution(generator);
                     auto it = std::begin(cset); std::advance(it, random);
@@ -134,8 +138,7 @@ public:
 //print_vector(selected_indices);
     }
 
-    static void conflict_sets_policy(int N, int K, int seed, bloom::OrdinaryBloomFilter<uint32_t>& bloom,
-                                    std::vector<int>& selected_indices) {
+    static void conflict_sets_policy(int N, int K, int seed, bloom::OrdinaryBloomFilter<uint32_t>& bloom, std::vector<int>& selected_indices) {
         std::map<int, std::unordered_set<int>> conflict_sets;
         build_conflict_sets(N, bloom, conflict_sets);
 //print_map(conflict_sets);
@@ -146,7 +149,6 @@ public:
         // Collect selected indices
         choose_indices_from_conflict_sets(K, seed, conflict_sets_ordered, selected_indices);
      }
-
 
     static void leftmostK(int N, int K, bloom::OrdinaryBloomFilter<uint32_t>& bloom,
                                     std::vector<int>& selected_indices) {
