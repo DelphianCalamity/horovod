@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <functional>
+#include <thread>
 
 using namespace tensorflow;
 
@@ -52,6 +53,9 @@ REGISTER_OP("BloomDecompressor")
 .Output("decompressed_tensor: int32")
 .Doc(R"doc()doc");
 
+void bloom_insert(bloom::OrdinaryBloomFilter<uint32_t>& bloom, int x) {
+    bloom.Insert(x);
+}
 class BloomCompressorOp : public OpKernel {
 
 public:
@@ -82,10 +86,14 @@ public:
 
         // Building Bloom Filter
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size);
+        std::thread threads[K];
         for (int i=0; i<K; ++i) {
-            bloom.Insert(indices_flat(i));
+    //        bloom.Insert(i);
+            threads[i] = std::thread(bloom_insert, std::ref(bloom), i);
         }
-
+        for (int i=0; i<K; ++i) {
+            threads[i].join();
+        }
         // Create an output tensor
         TensorShape output_shape;
         output_shape.AddDim(output_concat_dim);

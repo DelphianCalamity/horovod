@@ -8,6 +8,8 @@
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/op.h"
 #include "../../third_party/bloomfilter/inc/OrdinaryBloomFilter.hpp"
+#include <mutex>
+#include <thread>
 
 using namespace tensorflow;
 #include <random>
@@ -40,19 +42,26 @@ public:
         return policy_errors;
     }
 
+    static void insert_to_conflict_set(std::mutex& conflict_sets_mutex, bloom::OrdinaryBloomFilter<uint32_t>& bloom, std::map<int, std::unordered_set<int>>& conflict_sets, size_t i) {
+        uint8_t hash_num = bloom.Get_numHashes();
+        if (bloom.Query(i)) {  // If it is positive
+            for (uint8_t j=0; j<hash_num; j++) {
+                int hash = bloom.Get_Hash(i,j);
+                std::lock_guard<std::mutex> guard(conflict_sets_mutex);
+                conflict_sets[hash].insert(i);
+            }
+        }
+    }
+
     static void build_conflict_sets(int N, bloom::OrdinaryBloomFilter<uint32_t>& bloom, std::map<int, std::unordered_set<int>>& conflict_sets) {
         // Iterating over the universe and collecting the conflict sets
-        uint8_t hash_num = bloom.Get_numHashes();
+        std::mutex conflict_sets_mutex;
+        std::thread threads[N];
         for (size_t i=0; i<N; i++) {
-            if (bloom.Query(i)) {  // If it is positive
-                for (uint8_t j=0; j<hash_num; j++) {
-                    int hash = bloom.Get_Hash(i,j);
-//                    std::set<int>& cs = conflict_sets[hash];
-//                    if (std::find(cs.begin(), cs.end(), i) == cs.end()) {
-                    conflict_sets[hash].insert(i);
-//                    }
-                }
-            }
+            threads[i] = std::thread(insert_to_conflict_set, std::ref(conflict_sets_mutex), std::ref(bloom), std::ref(conflict_sets), i);
+        }
+        for (int i=0; i<N; ++i) {
+            threads[i].join();
         }
     }
 
@@ -160,6 +169,22 @@ public:
             }
         }
      }
+
+//    static void randomK(int N, int K, bloom::OrdinaryBloomFilter<uint32_t>& bloom,
+//                                    std::vector<int>& selected_indices) {
+//        std::default_random_engine generator;
+//        generator.seed(seed);
+//
+//        // Iterating over the universe and collecting the first K positives
+//        for (size_t i=0, left=K; i<N && left>0; i++) {
+//            std::uniform_int_distribution<int> distribution(0, );
+//            random = distribution(generator);
+//            if (bloom.Query(i)) {  // If it is positive
+//                selected_indices.push_back(i);
+//                left--;
+//            }
+//        }
+//     }
 
      static void select_indices(std::string policy, int N, int K, int64 step,
                                 bloom::OrdinaryBloomFilter<uint32_t>& bloom,
