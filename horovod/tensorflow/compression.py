@@ -296,7 +296,7 @@ class Bloom_Filter_Compressor(Compressor):
 
         compress_ratio = params["compress_ratio"]
         k = max(1, int(elemnum * compress_ratio))
-
+        params['K'] = k
         # Configure bloom filter's m, k values
         assert params["bloom_fpr"] is not None, "False Positive Rate is None"
         params['m'], params['k'] = Bloom_Filter_Compressor.bloom_configuration(k, params["bloom_fpr"])
@@ -326,26 +326,37 @@ class Bloom_Filter_Compressor(Compressor):
                                              verbosity_frequency=params['bloom_verbosity_frequency'],
                                              verbosity=params['bloom_verbosity'],
                                              rank=rank())
-        ctx = tensor_shape
+
+        values = tf.bitcast(values, tf.uint8)
+        values_shape = tf.shape(values)
+        # params['values_size'] = k * 4
+        ctx = [tensor_shape, values_shape]
+        # ctx = tensor_shape
         params['tensors_size_are_same'] = True
         return compressed_tensor, ctx
 
     @staticmethod
     def decompress(compressed_tensor, ctx, params):
 
-        tensor_shape = ctx
+        compressed_tensor_size = tf.math.reduce_prod(tf.shape(compressed_tensor))
+        values, compressed_indices = tf.split(compressed_tensor, [compressed_tensor_size-params['m'], params['m']])
+        values = tf.reshape(values, ctx[1])
+        values = tf.bitcast(values, tf.float32)
+        tensor_shape = ctx[0]
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
         library = load_library.load_op_library(filename)
         bloom_decompressor = library.bloom_decompressor
 
-        decompressed_tensor = bloom_decompressor(compressed_tensor, tensor_size,
+
+        decompressed_indices = bloom_decompressor(compressed_indices, tensor_size,
                                                  tf.train.get_or_create_global_step(),
                                                  policy=params['bloom_policy'],
                                                  mem_mode=params['mem_mode'],
                                                  hash_num=params['k'],
                                                  bloom_size=params['m'],
+                                                 K=params['K'],
                                                  bloom_logs_path=params['bloom_logs_path'],
                                                  gradient_id=params['gradient_id'],
                                                  verbosity_frequency=params['bloom_verbosity_frequency'],
@@ -353,7 +364,10 @@ class Bloom_Filter_Compressor(Compressor):
                                                  suffix=params['suffix'],
                                                  rank=rank())
 
-        decompressed_tensor = tf.bitcast(decompressed_tensor, tf.float32)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
+        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        with tf.control_dependencies([op]):
+            decompressed_tensor = tf.scatter_update(zero_tensor, decompressed_indices, values)
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
         return decompressed_tensor
 

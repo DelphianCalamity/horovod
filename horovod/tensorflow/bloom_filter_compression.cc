@@ -39,13 +39,14 @@ REGISTER_OP("BloomDecompressor")
 .Attr("mem_mode: int")
 .Attr("hash_num: int")
 .Attr("bloom_size: int")
+.Attr("K: int")
 .Attr("bloom_logs_path: string")
 .Attr("gradient_id: int")
 .Attr("rank: int")
 .Attr("suffix: int")
 .Attr("verbosity_frequency: int")
 .Attr("verbosity: int")
-.Input("compressed_tensor: int8")
+.Input("compressed_indices: int8")
 .Input("decompressed_size: int32")
 .Input("step: int64")
 .Output("decompressed_tensor: int32")
@@ -148,6 +149,7 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("mem_mode", &mem_mode));
         OP_REQUIRES_OK(context, context->GetAttr("hash_num", &hash_num));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_size", &bloom_size));
+        OP_REQUIRES_OK(context, context->GetAttr("K", &K));
         OP_REQUIRES_OK(context, context->GetAttr("bloom_logs_path", &bloom_logs_path));
         OP_REQUIRES_OK(context, context->GetAttr("gradient_id", &gradient_id));
         OP_REQUIRES_OK(context, context->GetAttr("rank", &rank));
@@ -159,45 +161,34 @@ public:
     void Compute(OpKernelContext *context) override {
 
         // Retrieving Inputs
-        const Tensor &compressed_tensor = context->input(0);
-        auto compressed_tensor_flat = compressed_tensor.flat<int8>();
+        const Tensor &compressed_indices = context->input(0);
+        auto compressed_indices_flat = compressed_indices.flat<int8>();
         int N = *context->input(1).flat<int>().data();
-        int K = (compressed_tensor_flat.size()-bloom_size)/sizeof(int);
         int64 step = context->input(2).flat<int64>()(0);
 
         // Reconstruct the bloom filter
-        const int8 *ptr = compressed_tensor_flat.data();           // Note: int8 is 1 byte
-        int values_bytes = K*sizeof(int);
-        int *values_vec = (int*) malloc(values_bytes);
-        memcpy(values_vec, ptr, values_bytes);
-        ptr += values_bytes;
+        const int8 *ptr = compressed_indices_flat.data();           // Note: int8 is 1 byte
         bloom::OrdinaryBloomFilter<uint32_t> bloom(hash_num, bloom_size, ptr);
 
         // Create an output tensor
         TensorShape decompressed_tensor_shape;
-        decompressed_tensor_shape.AddDim(N);
+        decompressed_tensor_shape.AddDim(K);
         Tensor *decompressed_tensor = NULL;
         OP_REQUIRES_OK(context, context->allocate_output(0, decompressed_tensor_shape, &decompressed_tensor));
         auto decompressed_tensor_flat = decompressed_tensor->template flat<int>();
-        memset(decompressed_tensor_flat.data(), 0, N*sizeof(int));
 
         // Select Indices using a Policy
         std::vector<int> selected_indices;
         Policies::select_indices(policy, N, K, step, bloom, selected_indices);
 
-        // Map values to the selected indices
-        for (int i=0; i<K; i++) {
-            decompressed_tensor_flat(selected_indices[i]) = values_vec[i];
-        }
+        std::copy(selected_indices.begin(), selected_indices.end(), decompressed_tensor_flat.data());
 
         // *********************** For Debugging ********************** //
-        if (verbosity_frequency != 0 && step % verbosity_frequency == 0 && mem_mode == 0) {
-            CompressionUtilities::logging_decompressor(bloom, N, K, values_vec, selected_indices, bloom_logs_path,
-                                gradient_id, suffix, step, decompressed_tensor, policy, rank, verbosity);
-        }
+//        if (verbosity_frequency != 0 && step % verbosity_frequency == 0 && mem_mode == 0) {
+//            CompressionUtilities::logging_decompressor(bloom, N, K, values_vec, selected_indices, bloom_logs_path,
+//                                gradient_id, suffix, step, decompressed_tensor, policy, rank, verbosity);
+//        }
         // *********************** For Debugging ********************** //
-
-        free(values_vec);
     }
 
 private:
@@ -205,6 +196,7 @@ private:
     int mem_mode;
     int hash_num;
     int bloom_size;
+    int K;
     // Logging
     string bloom_logs_path;
     int gradient_id;
@@ -216,3 +208,6 @@ private:
 
 REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_CPU), BloomCompressorOp);
 REGISTER_KERNEL_BUILDER(Name("BloomDecompressor").Device(DEVICE_CPU), BloomDecompressorOp);
+
+//REGISTER_KERNEL_BUILDER(Name("BloomCompressor").Device(DEVICE_GPU), BloomCompressorOp);
+//REGISTER_KERNEL_BUILDER(Name("BloomDecompressor").Device(DEVICE_GPU), BloomDecompressorOp);
