@@ -8,6 +8,7 @@ tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import random, math
 from horovod.tensorflow.mpi_ops import _allreduce
 from horovod.tensorflow.mpi_ops import rank
+import numpy as np
 import wandb
 
 
@@ -357,6 +358,108 @@ class Bloom_Filter_Compressor(Compressor):
         decompressed_tensor = tf.reshape(decompressed_tensor, tensor_shape)
         return decompressed_tensor
 
+class TopK_Values_Approximation_Compressor(Compressor):
+
+    @staticmethod
+    def logit_basis(X, a, N):  # log(p/(1-p))
+        return tf.cast(a * tf.math.log(X / ((N + 1) - X)), dtype=tf.float32)
+
+    @staticmethod
+    def exp_basis(X, b, c):
+        return tf.cast(b * tf.math.exp(c * X), dtype=tf.float32)
+
+    @staticmethod
+    def GetInputMatrix(x, p0, N):
+        Xtrans = tf.ones([1, N], tf.float32)  # [np.ones(N)] #{1}
+        for [a, b, c] in p0:
+            basis = TopK_Values_Approximation_Compressor.logit_basis(x, a, N)
+            Xtrans = tf.concat([Xtrans, basis], axis=0)
+            basis = TopK_Values_Approximation_Compressor.exp_basis(x, b, c)
+            Xtrans = tf.concat([Xtrans, basis], axis=0)
+        return tf.transpose(Xtrans)
+
+    @staticmethod
+    def LeastSquares(X, y):  # returns (X'X)^-1 X'y
+        Xtrans = tf.transpose(X)
+        tmp = tf.matmul(Xtrans, X)
+        inverse = tf.linalg.inv(tmp)
+        theta_estimates = tf.matmul(tf.matmul(inverse, Xtrans), y)
+        return theta_estimates
+
+    @staticmethod
+    def compress(tensor, params):
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        N = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
+        k = max(1, int(N * compress_ratio))
+
+        p0 = [[0.004, -0.01, -0.04]]
+        num_of_coefficients = 3
+        x_train = np.array(range(1, N+1), np.int32).reshape([1, N])
+        y_train = tf.reshape(tf.sort(tensor_flatten, axis=0, direction='ASCENDING'), [N, 1])
+        X_train = TopK_Values_Approximation_Compressor.GetInputMatrix(x_train, p0, N)
+        theta_estimates = TopK_Values_Approximation_Compressor.LeastSquares(X_train, y_train)
+        y_estimates = tf.matmul(X_train, theta_estimates)
+        y_estimates = tf.reshape(y_estimates, [-1])
+        _, estimated_indices = tf.math.top_k(tf.math.abs(y_estimates), k, sorted=False)
+
+        ##################### Logging #####################
+        # estimated_values = tf.gather(y_estimates, estimated_indices)
+        # _, true_indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
+        # true_values = tf.gather(tensor_flatten, true_indices)
+
+        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        library = load_library.load_op_library(filename)
+        logger = library.logger
+        logger = logger(tensor_flatten, y_estimates, theta_estimates,
+                                        tf.train.get_or_create_global_step(),
+                                        K=k,
+                                        bloom_logs_path=params['bloom_logs_path'],
+                                        gradient_id=params['gradient_id'],
+                                        verbosity_frequency=params['bloom_verbosity_frequency'],
+                                        verbosity=params['bloom_verbosity'],
+                                        rank=rank())
+        ##################### / Logging #####################
+
+        compressed_indices = estimated_indices
+        with tf.control_dependencies([logger]):
+            theta_estimates = tf.bitcast(theta_estimates, tf.int32)
+        theta_estimates = tf.reshape(theta_estimates, [-1])
+        theta_shape = tf.shape(theta_estimates)
+        tensor_compressed = tf.concat([theta_estimates, compressed_indices], 0)
+        ctx = [tensor_shape, theta_shape]
+
+        params['tensors_size_are_same'] = True
+        params['theta_estimates_size'] = num_of_coefficients
+        params['X_train'] = X_train
+        params['topk_k'] = k
+        params['p0'] = p0
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+
+        compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
+        theta_estimates, estimated_indices = tf.split(tensor_compressed, [params['theta_estimates_size'], compressed_tensor_size-params['theta_estimates_size']])
+        theta_estimates = tf.reshape(theta_estimates, ctx[1])
+        theta_estimates = tf.bitcast(theta_estimates, tf.float32)
+        tensor_shape = ctx[0]
+        N = tf.math.reduce_prod(tensor_shape)
+        decompressed_indices = estimated_indices
+
+        y_estimates = tf.matmul(params['X_train'], theta_estimates)
+        y_estimates = tf.reshape(y_estimates, [-1])
+        _, estimated_indices = tf.math.top_k(tf.math.abs(y_estimates), params['topk_k'], sorted=False)
+        estimated_values = tf.gather(y_estimates, estimated_indices)
+
+        zero_tensor = tf.Variable(tf.zeros([N], dtype=tf.float32), trainable=False)
+        op = zero_tensor.assign(tf.zeros([N], dtype=tf.float32))
+        with tf.control_dependencies([op]):
+            tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, estimated_values)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
 
 # class Stacked_Bloom_Filter_Compressor_Conflict_Sets(Compressor):
 #     """"""
@@ -1874,7 +1977,6 @@ class Compression(object):
 
     """Compress all floating point gradients to 16-bit."""
     fp16 = FP16Compressor
-
     randomk = RandomkCompressor
     topk = TopKCompressor
     threshold = ThresholdCompressor
@@ -1894,3 +1996,4 @@ class Compression(object):
     inceptionn = INCEPTIONNCompressor
     fake = FakeCompressor
     bloom = Bloom_Filter_Compressor
+    topk_values_approximation = TopK_Values_Approximation_Compressor

@@ -124,7 +124,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     if not params['compress_state']:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
                        'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch',
-                       'bloom']:
+                       'bloom', 'topk_values_approximation']:
             comp_dict[method] = Compression.fake
 
     default_params = {}
