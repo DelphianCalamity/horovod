@@ -396,15 +396,20 @@ class TopK_Values_Approximation_Compressor(Compressor):
         k = max(1, int(N * compress_ratio))
 
         p0 = [[0.004, -0.01, -0.04]]
-        num_of_coefficients = 3
+        num_of_coefficients = len(p0[0])
         x_train = np.array(range(1, N+1), np.int32).reshape([1, N])
-        y_train = tf.reshape(tf.sort(tensor_flatten, axis=0, direction='ASCENDING'), [N, 1])
+        mapping = tf.argsort(tensor_flatten, axis=0, direction='ASCENDING', stable=False)
+        # print(mapping)
+        y_train = tf.gather(tensor_flatten, mapping)
+        y_train = tf.reshape(y_train, [N, 1])
+
         X_train = TopK_Values_Approximation_Compressor.GetInputMatrix(x_train, p0, N)
         theta_estimates = TopK_Values_Approximation_Compressor.LeastSquares(X_train, y_train)
         y_estimates = tf.matmul(X_train, theta_estimates)
         y_estimates = tf.reshape(y_estimates, [-1])
         _, estimated_indices = tf.math.top_k(tf.math.abs(y_estimates), k, sorted=False)
 
+        mapped_estimated_indices = tf.gather(mapping, estimated_indices)
         ##################### Logging #####################
         # estimated_values = tf.gather(y_estimates, estimated_indices)
         # _, true_indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
@@ -423,7 +428,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
                                         rank=rank())
         ##################### / Logging #####################
 
-        compressed_indices = estimated_indices
+        compressed_indices = mapped_estimated_indices
         with tf.control_dependencies([logger]):
             theta_estimates = tf.bitcast(theta_estimates, tf.int32)
         theta_estimates = tf.reshape(theta_estimates, [-1])
