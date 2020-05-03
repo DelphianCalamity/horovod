@@ -8,7 +8,8 @@ import math
 tf.enable_eager_execution()
 print(tf.executing_eagerly())
 
-path = "logs/1/step_1/1/"
+path_prefix = "logs/"
+path = path_prefix + "1/step_1/1/"
 with open(path+'log.txt') as f:
     K = int(next(f).split()[0])
 init_tensor = pd.read_csv(path+'values.csv', header=None, sep="\s+", names=["Y", "Yest"])
@@ -36,8 +37,12 @@ plt.rcParams["figure.figsize"] = [20, 10]
 true_values_sent = tf.gather(Y, mapped_estimated_indices)
 rmse = tf.math.sqrt(tf.reduce_sum(tf.math.pow(true_values_sent-estimated_values, 2)))
 print(rmse)
-with open("logs/"+'rmse.txt', 'a') as f:
+with open(path_prefix+'rmse.txt', 'a') as f:
     f.write(str(rmse) + "\n")
+
+non_topk_errors = np.where(indices_Y.numpy() != mapped_estimated_indices.numpy())
+with open(path_prefix+'non-topk-errors.txt', 'a') as f:
+    f.write(str(non_topk_errors[0].size) + "\n")
 
 
 plt.plot(range(1, N+1), Y, 'c.', markersize=2, label="True")

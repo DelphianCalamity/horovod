@@ -156,7 +156,7 @@ class TopKCompressor(Compressor):
         values = tf.gather(tensor_flatten, indices)
 
         if params['encoding'] is not None:
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
 
             if params['encoding'] == "integer_compression":
@@ -231,7 +231,7 @@ class TopKCompressor(Compressor):
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
         if params['encoding'] is not None:
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
 
             if params['encoding'] == "integer_compression":
@@ -312,7 +312,7 @@ class Bloom_Filter_Compressor(Compressor):
         values = tf.gather(tensor_flatten, indices)
         values = tf.bitcast(values, tf.int32)
 
-        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
         library = load_library.load_op_library(filename)
         bloom_compressor = library.bloom_compressor
 
@@ -337,7 +337,7 @@ class Bloom_Filter_Compressor(Compressor):
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
-        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
         library = load_library.load_op_library(filename)
         bloom_decompressor = library.bloom_decompressor
 
@@ -415,7 +415,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
         # _, true_indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
         # true_values = tf.gather(tensor_flatten, true_indices)
 
-        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
         library = load_library.load_op_library(filename)
         logger = library.logger
         logger = logger(tensor_flatten, y_estimates, theta_estimates,
@@ -524,7 +524,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
 #         values = tf.gather(tensor_flatten, indices)
 #         values = tf.bitcast(values, tf.int32)
 #
-#         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+#         filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
 #         library = load_library.load_op_library(filename)
 #         bloom_compressor = library.stacked_bloom_compressor_conflict_sets
 #
@@ -551,7 +551,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
 #         tensor_shape = ctx
 #         tensor_size = tf.math.reduce_prod(tensor_shape)
 #
-#         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+#         filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
 #         library = load_library.load_op_library(filename)
 #         bloom_decompressor = library.stacked_bloom_decompressor_conflict_sets
 #
@@ -607,7 +607,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
 #         values = tf.gather(tensor_flatten, indices)
 #         values = tf.bitcast(values, tf.int32)
 #
-#         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+#         filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
 #         library = load_library.load_op_library(filename)
 #         bloom_adaptive_compressor = library.bloom_adaptive_compressor
 #
@@ -631,7 +631,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
 #         tensor_shape = ctx
 #         tensor_size = tf.math.reduce_prod(tensor_shape)
 #
-#         filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+#         filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
 #         library = load_library.load_op_library(filename)
 #         bloom_adaptive_decompressor = library.bloom_adaptive_decompressor
 #

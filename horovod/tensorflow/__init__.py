@@ -120,6 +120,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["sketch"] = Compression.sketch
     comp_dict["inceptionn"] = Compression.inceptionn
     comp_dict["bloom"] = Compression.bloom
+    comp_dict["topk_values_approximation"] = Compression.topk_values_approximation
     # testing
     if not params['compress_state']:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',

@@ -867,11 +867,13 @@ def build_tf_extension(build_ext, global_options):
     tensorflow_mpi_lib.include_dirs = options['INCLUDES']
     tensorflow_mpi_lib.sources = options['SOURCES'] + \
                                  ['horovod/tensorflow/mpi_ops.cc'] + \
+                                 ['horovod/tensorflow/logger.cc'] + \
                                  ['horovod/tensorflow/bloom_filter_compression.cc'] + \
                                  ['horovod/tensorflow/rle_compression/rle_compression0_8.cc'] + \
                                  ['horovod/tensorflow/rle_compression/rle_compression1_8.cc'] + \
                                  ['horovod/tensorflow/rle_compression/rle_compression1_32.cc'] + \
                                  ['horovod/tensorflow/integer_compression.cc']
+
     tensorflow_mpi_lib.extra_compile_args = options['COMPILE_FLAGS'] + \
                                             tf_compile_flags
     tensorflow_mpi_lib.extra_link_args = options['LINK_FLAGS'] + tf_link_flags
