@@ -174,7 +174,7 @@ public:
         }
     }
 
-    static void logging(int N, int K, int num_of_coefficients, const Tensor& initial_tensor, const Tensor& estimated_tensor, const Tensor& theta_estimates,
+    static void logging(int N, const Tensor& initial_tensor, const Tensor& estimated_tensor,
     std::string bloom_logs_path, int gradient_id, int64 step, int rank, int verbosity) {
 
         FILE* f;
@@ -192,10 +192,9 @@ public:
         if (verbosity > 1) {
             str = path + "log.txt";
             f = fopen(str.c_str(),"w");
-            fprintf(f, "%d\n\n", K);
             fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(N).c_str());
             fprintf(f, "\nEstimated Tensor: %s\n\n", estimated_tensor.DebugString(N).c_str());
-            fprintf(f, "\nCoefficients: %s\n\n", theta_estimates.DebugString(num_of_coefficients).c_str());
+//            fprintf(f, "\nCoefficients: %s\n\n", coefficients.DebugString(num_of_coefficients).c_str());
             fprintf(f, "Step: = %d\n\n", step);
         }
         auto initial_flat = initial_tensor.flat<float>();

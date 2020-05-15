@@ -9,7 +9,7 @@ tf.enable_eager_execution()
 print(tf.executing_eagerly())
 
 path_prefix = "logs/"
-path = path_prefix + "1/step_1/1/"
+path = path_prefix + "1/step_0/1/"
 with open(path+'log.txt') as f:
     K = int(next(f).split()[0])
 init_tensor = pd.read_csv(path+'values.csv', header=None, sep="\s+", names=["Y", "Yest"])
