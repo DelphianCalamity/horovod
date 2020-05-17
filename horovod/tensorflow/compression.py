@@ -366,11 +366,11 @@ class TopK_Values_Approximation_Compressor(Compressor):
         # S, SS initialization
         Ysum = Y_ + tf.roll(Y_, shift=-1, axis=0)
         Xsum = tf.roll(X_, shift=-1, axis=0) - X_
-        S = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ysum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1))
+        S = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ysum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1, tf.float64))
         S = tf.math.cumsum(S)
 
         Ssum = S + tf.roll(S, shift=-1, axis=0)
-        SS = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ssum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1))
+        SS = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ssum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1, tf.float64))
         SS = tf.math.cumsum(SS)
 
         sum_SSk_squared = tf.reshape(tf.math.reduce_sum(tf.math.pow(SS, 2)), [1, ])
@@ -380,9 +380,9 @@ class TopK_Values_Approximation_Compressor(Compressor):
         sum_Sk_squared = tf.reshape(tf.math.reduce_sum(tf.math.pow(S, 2)), [1, ])
         sum_Sk_xk = tf.reshape(tf.math.reduce_sum(S * X_), [1, ])
         sum_Sk = tf.reshape(tf.math.reduce_sum(S), [1, ])
-        sum_data_x = tf.reshape(tf.cast(K * (K + 1) / 2, tf.float32), [1, ])
-        sum_data_x_squared = tf.reshape(tf.cast(K * (K + 1) * (2 * K + 1) / 6, tf.float32), [1, ])
-        K = tf.reshape(tf.cast(K, tf.float32), [1, ])
+        sum_data_x = tf.reshape(tf.cast(K * (K + 1) / 2, tf.float64), [1, ])
+        sum_data_x_squared = tf.reshape(tf.cast(K * (K + 1) * (2 * K + 1) / 6, tf.float64), [1, ])
+        K = tf.reshape(tf.cast(K, tf.float64), [1, ])
 
         # Form the first system
         values = tf.concat([sum_SSk_squared, sum_Sk_squared, sum_data_x_squared, K,
@@ -409,7 +409,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
         b_vector_1 = tf.reshape(b_vector_1, [4, 1])
 
         # Solve the first system
-        Coefficient_vector_1 = tf.compat.v1.linalg.lstsq(A_LS_1, b_vector_1)
+        Coefficient_vector_1 = tf.compat.v1.linalg.solve(A_LS_1, b_vector_1)
 
         # Calculate p1 and q1
         p1 = 0.5 * (Coefficient_vector_1[1] + tf.math.sqrt(tf.math.pow(Coefficient_vector_1[1], 2)
@@ -433,12 +433,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
         b_vector_2 = tf.reshape(b_vector_2, [2, 1])
 
         # Solve the second system
-        Coefficient_vector_2 = tf.compat.v1.linalg.lstsq(A_LS_2, b_vector_2)
-
-        # print("Coefficient_vector_1: \n", Coefficient_vector_1)
-        # print("p1:\n", p1)
-        # print("Coefficient_vector_2:\n", Coefficient_vector_2)
-        # print("q1:\n", q1)
+        Coefficient_vector_2 = tf.compat.v1.linalg.solve(A_LS_2, b_vector_2)
 
         return Coefficient_vector_2[0], Coefficient_vector_2[1], p1, q1
 
@@ -447,78 +442,89 @@ class TopK_Values_Approximation_Compressor(Compressor):
         tensor_shape = tf.shape(tensor)
         tensor_flatten = tf.reshape(tensor, [-1])
         N = tensor_flatten.get_shape().as_list()[0]
+        params['N'] = int(N)
+        if params['N'] >= 2304:
+            print("Tensor", tensor)
+            abs_values = tf.math.abs(tensor_flatten)
+            sorted_indices = tf.argsort(abs_values, axis=0, direction='ASCENDING')
+            values_sorted = tf.gather(abs_values, sorted_indices)
 
-        abs_values = tf.math.abs(tensor_flatten)
-        sorted_indices = tf.argsort(abs_values, axis=0, direction='ASCENDING')
-        values_sorted = tf.gather(abs_values, sorted_indices)
+            negative_indices = tf.where(tf.less(tf.gather(tensor_flatten, sorted_indices), 0))
+            X = np.array(range(1, N + 1), np.float64)
 
-        negative_indices = tf.where(tf.less(tf.gather(tensor_flatten, sorted_indices), 0))
-        X = np.array(range(1, N + 1), np.float32)
+            Nneg = tf.size(negative_indices)
+            mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
+            sorted_indices = (sorted_indices + 1) * mask
 
-        Nneg = tf.size(negative_indices)
-        mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
-        sorted_indices = (sorted_indices + 1) * mask
+            coefficients = TopK_Values_Approximation_Compressor.double_exponential_fit(X,
+                                                                                       tf.cast(values_sorted,tf.float64), N)
+            num_of_coefficients = len(coefficients)
+            # coefficients = tf.cast(coefficients, tf.float32)
 
-        coefficients = TopK_Values_Approximation_Compressor.double_exponential_fit(X, values_sorted, N)
-        num_of_coefficients = len(coefficients)
+            ##################### Logging #####################
+            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            library = load_library.load_op_library(filename)
+            logger = library.logger
+            y = coefficients[0] * tf.math.exp(coefficients[2] * X) + coefficients[1] * tf.math.exp(coefficients[3] * X)
+            # y = tf.cast(y, tf.float32) * tf.cast(mask, tf.float64)
+            y = y * tf.cast(mask, tf.float64)
 
-        ##################### Logging #####################
-        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
-        library = load_library.load_op_library(filename)
-        logger = library.logger
-        y = coefficients[0] * tf.math.exp(coefficients[2] * X) + coefficients[1] * tf.math.exp(coefficients[3] * X)
-        y = y * tf.cast(mask, tf.float32)
+            logger = logger(tensor_flatten, tf.cast(y, tf.float32), tf.train.get_or_create_global_step(),
+                                    bloom_logs_path=params['bloom_logs_path'],
+                                    gradient_id=params['gradient_id'],
+                                    verbosity_frequency=params['bloom_verbosity_frequency'],
+                                    verbosity=params['bloom_verbosity'],
+                                    rank=rank())
+            ##################### / Logging #####################
 
-        logger = logger(tensor_flatten, y, tf.train.get_or_create_global_step(),
-                                bloom_logs_path=params['bloom_logs_path'],
-                                gradient_id=params['gradient_id'],
-                                verbosity_frequency=params['bloom_verbosity_frequency'],
-                                verbosity=params['bloom_verbosity'],
-                                rank=rank())
-        ##################### / Logging #####################
+            compressed_indices = sorted_indices
+            with tf.control_dependencies([logger]):
+                coefficients = tf.reshape(coefficients, [-1])
+                compressed_indices = tf.cast(compressed_indices, tf.float64)
+                tensor_compressed = tf.concat([coefficients, compressed_indices], 0)
+            params['message_size'] = num_of_coefficients
+            params['X_train'] = X
 
-        compressed_indices = sorted_indices
+        else:
+            tensor_compressed = tensor
 
-        with tf.control_dependencies([logger]):
-            coefficients = tf.reshape(coefficients, [-1])
-            compressed_indices = tf.cast(compressed_indices, tf.float32)
-            tensor_compressed = tf.concat([coefficients, compressed_indices], 0)
         ctx = tensor_shape
-        params['message_size'] = num_of_coefficients
-        params['X_train'] = X
         params['tensors_size_are_same'] = True
         return tensor_compressed, ctx
 
     @staticmethod
     def decompress(tensor_compressed, ctx, params):
         compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
-        message, indices = tf.split(tensor_compressed,
-                                    [params['message_size'], compressed_tensor_size - params['message_size']])
         tensor_shape = ctx
         N = tf.math.reduce_prod(tensor_shape)
-        decompressed_indices = tf.cast(indices, tf.int32)
 
-        negative_indices = tf.where(tf.less(decompressed_indices, 0))
-        decompressed_indices = tf.math.abs(decompressed_indices)
-        decompressed_indices = decompressed_indices - 1
+        if params['N'] >= 2304:
+            message, indices = tf.split(tensor_compressed,
+                                        [params['message_size'], compressed_tensor_size - params['message_size']])
+            decompressed_indices = tf.cast(indices, tf.int32)
+            negative_indices = tf.where(tf.less(decompressed_indices, 0))
+            decompressed_indices = tf.math.abs(decompressed_indices)
+            decompressed_indices = decompressed_indices - 1
 
-        y_estimates = message[0] * tf.math.exp(message[2] * params['X_train']) + \
-                      message[1] * tf.math.exp(message[3] * params['X_train'])
+            y_estimates = message[0] * tf.math.exp(message[2] * params['X_train']) + \
+                          message[1] * tf.math.exp(message[3] * params['X_train'])
 
-        Nneg = tf.size(negative_indices)
-        mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
-        y_estimates = y_estimates * tf.cast(mask, tf.float32)
-        values = tf.reshape(y_estimates, [-1])
-        # decompressed_indices = tf.Print(decompressed_indices, [decompressed_indices], message="\n\n\n\nIndices\n\n") #tf.Print("\n\nINDICES\n\n", decompressed_indices)
-        # decompressed_indices = tf.expand_dims(decompressed_indices, 1)
-        # with tf.control_dependencies([decompressed_indices]):
-        # tensor_decompressed = tf.scatter_nd(decompressed_indices, values, tensor_shape)
-        tensor_size = tf.math.reduce_prod(tensor_shape)
-        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
-        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
-        with tf.control_dependencies([op]):
-            tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, values)
-        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+            Nneg = tf.size(negative_indices)
+            mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
+            y_estimates = y_estimates * tf.cast(mask, tf.float64)
+            values = tf.reshape(y_estimates, [-1])
+            # decompressed_indices = tf.expand_dims(decompressed_indices, 1)
+            # tensor_decompressed = tf.scatter_nd(decompressed_indices, values, tensor_shape)
+            tensor_size = tf.math.reduce_prod(tensor_shape)
+            zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
+            op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+            with tf.control_dependencies([op]):
+                tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, tf.cast(values, tf.float32))
+            tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+
+        else:
+         tensor_decompressed = tensor_compressed
+
         return tensor_decompressed
 
 
