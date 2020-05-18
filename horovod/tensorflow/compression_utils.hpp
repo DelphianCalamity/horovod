@@ -174,7 +174,7 @@ public:
         }
     }
 
-    static void logging(int N, const Tensor& initial_tensor, const Tensor& estimated_tensor,
+    static void logging(int N, const Tensor& initial_tensor, const Tensor& coefficients,
     std::string bloom_logs_path, int gradient_id, int64 step, int rank, int verbosity) {
 
         FILE* f;
@@ -189,21 +189,26 @@ public:
         if(systemRet == -1){
             perror("mkdir failed");
         }
-        if (verbosity > 1) {
-            str = path + "log.txt";
-            f = fopen(str.c_str(),"w");
-            fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(N).c_str());
-            fprintf(f, "\nEstimated Tensor: %s\n\n", estimated_tensor.DebugString(N).c_str());
+//        if (verbosity > 1) {
+//            str = path + "log.txt";
+//            f = fopen(str.c_str(),"w");
+//            fprintf(f, "\nInitial Tensor: %s\n\n", initial_tensor.DebugString(N).c_str());
+//            fprintf(f, "\nEstimated Tensor: %s\n\n", coefficients.DebugString(N).c_str());
 //            fprintf(f, "\nCoefficients: %s\n\n", coefficients.DebugString(num_of_coefficients).c_str());
-            fprintf(f, "Step: = %d\n\n", step);
-        }
+//            fprintf(f, "Step: = %d\n\n", step);
+//        }
         auto initial_flat = initial_tensor.flat<float>();
-        auto estimated_tensor_flat = estimated_tensor.flat<float>();
+        auto coefficients_flat = coefficients.flat<float64>();
         str = path + "values.csv";
         f = fopen(str.c_str(),"w");
         for(int i=0; i<N; i++) {
-            fprintf(f, "%f  %f\n", initial_flat(i),  estimated_tensor_flat(i));
+            fprintf(f, "%f ", initial_flat(i));
         }
+        fprintf(f, "\n");
+        for(int i=0; i<coefficients_flat.size(); i++) {
+            fprintf(f, "%f ", coefficients_flat(i));
+        }
+        fprintf(f, "\n");
         fclose(f);
     }
 };

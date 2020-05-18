@@ -18,7 +18,7 @@ REGISTER_OP("Logger")
 .Attr("verbosity_frequency: int")
 .Attr("verbosity: int")
 .Input("initial_tensor: float32")
-.Input("estimated_tensor: float32")
+.Input("coefficients: float64")
 .Input("step: int64")
 .Doc(R"doc()doc");
 
@@ -37,14 +37,15 @@ public:
     void Compute(OpKernelContext *context) override {
 
         // Retrieving Inputs
-        const Tensor &initial_tensor = context->input(0); auto initial_flat = initial_tensor.flat<float>();
-        const Tensor &estimated_tensor = context->input(1);  auto estimated_tensor_flat = estimated_tensor.flat<float>();
+        const Tensor &initial_tensor = context->input(0);
+        int N = initial_tensor.flat<float>().size();
+        const Tensor &coefficients_tensor = context->input(1);
+        // auto coefficients_tensor_flat = coefficients_tensor.flat<float64>();
         int64 step = context->input(2).flat<int64>()(0);
-        int N = initial_flat.size();
 
         // *********************** Logging ********************** //
         if (verbosity_frequency != 0 && step % verbosity_frequency == 0 ) {
-            CompressionUtilities::logging(N, initial_tensor, estimated_tensor, bloom_logs_path, gradient_id,
+            CompressionUtilities::logging(N, initial_tensor, coefficients_tensor, bloom_logs_path, gradient_id,
                                         step, rank, verbosity);
         }
         // *********************** Logging ********************** //

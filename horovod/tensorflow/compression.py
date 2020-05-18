@@ -525,7 +525,7 @@ class Values_Approximation_Compressor(Compressor):
         print("Tensor", tensor, "size:", params['N'])
         # params["layers"].add_data(tensor, params['N'])
 
-        if params['N'] >= 35000: #25088:
+        if params['N'] >= 150000: #25088:
             abs_values = tf.math.abs(tensor_flatten)
             sorted_indices = tf.argsort(abs_values, axis=0, direction='ASCENDING')
             values_sorted = tf.gather(abs_values, sorted_indices)
@@ -544,10 +544,9 @@ class Values_Approximation_Compressor(Compressor):
             filename = resource_loader.get_path_to_datafile('mpi_lib.so')
             library = load_library.load_op_library(filename)
             logger = library.logger
-            y = coefficients[0] * tf.math.exp(coefficients[2] * X) + coefficients[1] * tf.math.exp(coefficients[3] * X)
-            y = y * tf.cast(mask, tf.float64)
-
-            logger = logger(tensor_flatten, tf.cast(y, tf.float32), tf.train.get_or_create_global_step(),
+            # y = coefficients[0] * tf.math.exp(coefficients[2] * X) + coefficients[1] * tf.math.exp(coefficients[3] * X)
+            # y = y * tf.cast(mask, tf.float64)
+            logger = logger(tensor_flatten, tf.cast(coefficients, tf.float32), tf.train.get_or_create_global_step(),
                             bloom_logs_path=params['bloom_logs_path'],
                             gradient_id=params['gradient_id'],
                             verbosity_frequency=params['bloom_verbosity_frequency'],
@@ -560,8 +559,8 @@ class Values_Approximation_Compressor(Compressor):
                 coefficients = tf.reshape(coefficients, [-1])
                 compressed_indices = tf.cast(compressed_indices, tf.float64)
                 tensor_compressed = tf.concat([coefficients, compressed_indices], 0)
-            params['message_size'] = num_of_coefficients
-            params['X_train'] = X
+                params['message_size'] = num_of_coefficients
+                params['X_train'] = X
 
         else:
             tensor_compressed = tensor
@@ -574,7 +573,7 @@ class Values_Approximation_Compressor(Compressor):
     def decompress(tensor_compressed, ctx, params):
         tensor_shape = ctx
 
-        if params['N'] >= 35000: #25088:
+        if params['N'] >= 150000: #25088:
             message, indices = tf.split(tensor_compressed, [params['message_size'], params['N']])
             decompressed_indices = tf.cast(indices, tf.int32)
             negative_indices = tf.where(tf.less(decompressed_indices, 0))
