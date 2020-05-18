@@ -120,12 +120,12 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["sketch"] = Compression.sketch
     comp_dict["inceptionn"] = Compression.inceptionn
     comp_dict["bloom"] = Compression.bloom
-    comp_dict["topk_values_approximation"] = Compression.topk_values_approximation
+    comp_dict["values_approximation"] = Compression.values_approximation
     # testing
     if not params['compress_state']:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
                        'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch',
-                       'bloom', 'topk_values_approximation']:
+                       'bloom', 'values_approximation']:
             comp_dict[method] = Compression.fake
 
     default_params = {}

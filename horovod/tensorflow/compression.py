@@ -359,33 +359,107 @@ class Bloom_Filter_Compressor(Compressor):
         return decompressed_tensor
 
 
-class TopK_Values_Approximation_Compressor(Compressor):
+class Values_Approximation_Compressor(Compressor):
 
     @staticmethod
+    # def double_exponential_fit(X_, Y_, K):
+    #     # S, SS initialization
+    #     Ysum = Y_ + tf.roll(Y_, shift=-1, axis=0)
+    #     Xsum = tf.roll(X_, shift=-1, axis=0) - X_
+    #     S = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ysum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1, tf.float64))
+    #     S = tf.math.cumsum(S)
+    #
+    #     Ssum = S + tf.roll(S, shift=-1, axis=0)
+    #     SS = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ssum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1, tf.float64))
+    #     SS = tf.math.cumsum(SS)
+    #
+    #     sum_SSk_squared = tf.reshape(tf.math.reduce_sum(tf.math.pow(SS, 2)), [1, ])
+    #     sum_SSk_Sk = tf.reshape(tf.math.reduce_sum(S * SS), [1, ])
+    #     sum_SSk_xk = tf.reshape(tf.math.reduce_sum(SS * X_), [1, ])
+    #     sum_SSk = tf.reshape(tf.math.reduce_sum(SS), [1, ])
+    #     sum_Sk_squared = tf.reshape(tf.math.reduce_sum(tf.math.pow(S, 2)), [1, ])
+    #     sum_Sk_xk = tf.reshape(tf.math.reduce_sum(S * X_), [1, ])
+    #     sum_Sk = tf.reshape(tf.math.reduce_sum(S), [1, ])
+    #     sum_data_x = tf.reshape(tf.cast(K * (K + 1) / 2, tf.float64), [1, ])
+    #     sum_data_x_squared = tf.reshape(tf.cast(K * (K + 1) * (2 * K + 1) / 6, tf.float64), [1, ])
+    #     K = tf.reshape(tf.cast(K, tf.float64), [1, ])
+    #
+    #     # Form the first system
+    #     values = tf.concat([sum_SSk_squared, sum_Sk_squared, sum_data_x_squared, K,
+    #                         sum_SSk_Sk, sum_SSk_xk, sum_SSk, sum_Sk_xk, sum_Sk, sum_data_x], axis=0)
+    #
+    #     A_LS_1 = tf.scatter_nd([[0, 0], [1, 1], [2, 2], [3, 3],
+    #                             [0, 1], [0, 2], [0, 3],
+    #                             [1, 2], [1, 3],
+    #                             [2, 3]],
+    #                            values, [4, 4])
+    #     A_LS_1 = tf.tensor_scatter_nd_update(A_LS_1,
+    #                                          [[0, 0], [1, 1], [2, 2], [3, 3],
+    #                                           [1, 0], [2, 0], [3, 0],
+    #                                           [2, 1], [3, 1],
+    #                                           [3, 2]],
+    #                                          values)
+    #     a = tf.reshape(tf.math.reduce_sum(tf.transpose(SS) * Y_), [1, ])
+    #     b = tf.reshape(tf.math.reduce_sum(tf.transpose(S) * Y_), [1, ])
+    #     c = tf.reshape(tf.math.reduce_sum(tf.transpose(X_) * Y_), [1, ])
+    #     d = tf.reshape(tf.math.reduce_sum(Y_), [1, ])
+    #
+    #     b_vector_1 = tf.concat([a, b, c, d], axis=0)
+    #     b_vector_1 = tf.reshape(b_vector_1, [4, 1])
+    #
+    #     # Solve the first system
+    #     Coefficient_vector_1 = tf.compat.v1.linalg.solve(A_LS_1, b_vector_1)
+    #
+    #     # Calculate p1 and q1
+    #     p1 = 0.5 * (Coefficient_vector_1[1] + tf.math.sqrt(tf.math.pow(Coefficient_vector_1[1], 2)
+    #                                                        + 4 * Coefficient_vector_1[0]))
+    #     q1 = 0.5 * (Coefficient_vector_1[1] - tf.math.sqrt(tf.math.pow(Coefficient_vector_1[1], 2)
+    #                                                        + 4 * Coefficient_vector_1[0]))
+    #
+    #     beta_k = tf.math.exp(p1 * X_)
+    #     eta_k = tf.math.exp(q1 * X_)
+    #
+    #     sum_betak_square = tf.reshape(tf.math.reduce_sum(tf.math.pow(beta_k, 2)), [1, ])
+    #     sum_etak_square = tf.reshape(tf.math.reduce_sum(tf.math.pow(eta_k, 2)), [1, ])
+    #     sum_betak_etak = tf.reshape(tf.math.reduce_sum(beta_k * eta_k), [1, ])
+    #
+    #     # Form the second system
+    #     A_LS_2 = tf.concat([sum_betak_square, sum_betak_etak, sum_betak_etak, sum_etak_square], axis=0)
+    #     A_LS_2 = tf.reshape(A_LS_2, [2, 2])
+    #     a = tf.reshape(tf.math.reduce_sum(tf.transpose(beta_k) * Y_), [1, ])
+    #     b = tf.reshape(tf.math.reduce_sum(tf.transpose(eta_k) * Y_), [1, ])
+    #     b_vector_2 = tf.concat([a, b], axis=0)
+    #     b_vector_2 = tf.reshape(b_vector_2, [2, 1])
+    #
+    #     # Solve the second system
+    #     Coefficient_vector_2 = tf.compat.v1.linalg.solve(A_LS_2, b_vector_2)
+    #
+    #     return Coefficient_vector_2[0], Coefficient_vector_2[1], p1, q1
+
     def double_exponential_fit(X_, Y_, K):
+
         # S, SS initialization
         Ysum = Y_ + tf.roll(Y_, shift=-1, axis=0)
         Xsum = tf.roll(X_, shift=-1, axis=0) - X_
         S = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ysum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1, tf.float64))
         S = tf.math.cumsum(S)
-
         Ssum = S + tf.roll(S, shift=-1, axis=0)
         SS = tf.tensor_scatter_nd_update(tf.roll(0.5 * Ssum * Xsum, shift=1, axis=0), [[0]], tf.zeros(1, tf.float64))
         SS = tf.math.cumsum(SS)
 
-        sum_SSk_squared = tf.reshape(tf.math.reduce_sum(tf.math.pow(SS, 2)), [1, ])
-        sum_SSk_Sk = tf.reshape(tf.math.reduce_sum(S * SS), [1, ])
-        sum_SSk_xk = tf.reshape(tf.math.reduce_sum(SS * X_), [1, ])
-        sum_SSk = tf.reshape(tf.math.reduce_sum(SS), [1, ])
-        sum_Sk_squared = tf.reshape(tf.math.reduce_sum(tf.math.pow(S, 2)), [1, ])
-        sum_Sk_xk = tf.reshape(tf.math.reduce_sum(S * X_), [1, ])
-        sum_Sk = tf.reshape(tf.math.reduce_sum(S), [1, ])
-        sum_data_x = tf.reshape(tf.cast(K * (K + 1) / 2, tf.float64), [1, ])
-        sum_data_x_squared = tf.reshape(tf.cast(K * (K + 1) * (2 * K + 1) / 6, tf.float64), [1, ])
-        K = tf.reshape(tf.cast(K, tf.float64), [1, ])
+        sum_SSk_squared = tf.math.reduce_sum(tf.math.pow(SS, 2))
+        sum_SSk_Sk = tf.math.reduce_sum(S * SS)
+        sum_SSk_xk = tf.math.reduce_sum(SS * X_)
+        sum_SSk = tf.math.reduce_sum(SS)
+        sum_Sk_squared = tf.math.reduce_sum(tf.math.pow(S, 2))
+        sum_Sk_xk = tf.math.reduce_sum(S * X_)
+        sum_Sk = tf.math.reduce_sum(S)
+        sum_data_x = tf.cast(K * (K + 1) / 2, tf.float64)
+        sum_data_x_squared = tf.cast(K * (K + 1) * (2 * K + 1) / 6, tf.float64)
+        K = tf.cast(K, tf.float64)
 
         # Form the first system
-        values = tf.concat([sum_SSk_squared, sum_Sk_squared, sum_data_x_squared, K,
+        values = tf.stack([sum_SSk_squared, sum_Sk_squared, sum_data_x_squared, K,
                             sum_SSk_Sk, sum_SSk_xk, sum_SSk, sum_Sk_xk, sum_Sk, sum_data_x], axis=0)
 
         A_LS_1 = tf.scatter_nd([[0, 0], [1, 1], [2, 2], [3, 3],
@@ -399,42 +473,46 @@ class TopK_Values_Approximation_Compressor(Compressor):
                                               [2, 1], [3, 1],
                                               [3, 2]],
                                              values)
-        # print(A_LS_1)
-        a = tf.reshape(tf.math.reduce_sum(tf.transpose(SS) * Y_), [1, ])
-        b = tf.reshape(tf.math.reduce_sum(tf.transpose(S) * Y_), [1, ])
-        c = tf.reshape(tf.math.reduce_sum(tf.transpose(X_) * Y_), [1, ])
-        d = tf.reshape(tf.math.reduce_sum(Y_), [1, ])
 
-        b_vector_1 = tf.concat([a, b, c, d], axis=0)
+        a = tf.math.reduce_sum(tf.transpose(SS) * Y_)
+        b = tf.math.reduce_sum(tf.transpose(S) * Y_)
+        c = tf.math.reduce_sum(tf.transpose(X_) * Y_)
+        d = tf.math.reduce_sum(Y_)
+
+        b_vector_1 = tf.stack([a, b, c, d], axis=0)
         b_vector_1 = tf.reshape(b_vector_1, [4, 1])
 
         # Solve the first system
-        Coefficient_vector_1 = tf.compat.v1.linalg.solve(A_LS_1, b_vector_1)
+        Coefficient_vector_1 = tf.linalg.solve(A_LS_1, b_vector_1)
 
         # Calculate p1 and q1
-        p1 = 0.5 * (Coefficient_vector_1[1] + tf.math.sqrt(tf.math.pow(Coefficient_vector_1[1], 2)
-                                                           + 4 * Coefficient_vector_1[0]))
-        q1 = 0.5 * (Coefficient_vector_1[1] - tf.math.sqrt(tf.math.pow(Coefficient_vector_1[1], 2)
-                                                           + 4 * Coefficient_vector_1[0]))
+        p1 = 0.5 * (Coefficient_vector_1[1] + tf.math.sqrt(
+            tf.math.pow(Coefficient_vector_1[1], 2) + 4 * Coefficient_vector_1[0]))
+        q1 = 0.5 * (Coefficient_vector_1[1] - tf.math.sqrt(
+            tf.math.pow(Coefficient_vector_1[1], 2) + 4 * Coefficient_vector_1[0]))
 
         beta_k = tf.math.exp(p1 * X_)
         eta_k = tf.math.exp(q1 * X_)
 
-        sum_betak_square = tf.reshape(tf.math.reduce_sum(tf.math.pow(beta_k, 2)), [1, ])
-        sum_etak_square = tf.reshape(tf.math.reduce_sum(tf.math.pow(eta_k, 2)), [1, ])
-        sum_betak_etak = tf.reshape(tf.math.reduce_sum(beta_k * eta_k), [1, ])
+        sum_betak_square = tf.math.reduce_sum(tf.math.pow(beta_k, 2))
+        sum_etak_square = tf.math.reduce_sum(tf.math.pow(eta_k, 2))
+        sum_betak_etak = tf.math.reduce_sum(beta_k * eta_k)
 
         # Form the second system
-        A_LS_2 = tf.concat([sum_betak_square, sum_betak_etak, sum_betak_etak, sum_etak_square], axis=0)
+        A_LS_2 = tf.stack([sum_betak_square, sum_betak_etak, sum_betak_etak, sum_etak_square], axis=0)
         A_LS_2 = tf.reshape(A_LS_2, [2, 2])
         a = tf.reshape(tf.math.reduce_sum(tf.transpose(beta_k) * Y_), [1, ])
         b = tf.reshape(tf.math.reduce_sum(tf.transpose(eta_k) * Y_), [1, ])
-        b_vector_2 = tf.concat([a, b], axis=0)
+        b_vector_2 = tf.stack([a, b], axis=0)
         b_vector_2 = tf.reshape(b_vector_2, [2, 1])
 
         # Solve the second system
-        Coefficient_vector_2 = tf.compat.v1.linalg.solve(A_LS_2, b_vector_2)
+        Coefficient_vector_2 = tf.linalg.solve(A_LS_2, b_vector_2)
 
+        # print("Coefficient_vector_1: \n", Coefficient_vector_1)
+        # print("p1:\n", p1)
+        # print("Coefficient_vector_2:\n", Coefficient_vector_2)
+        # print("q1:\n", q1)
         return Coefficient_vector_2[0], Coefficient_vector_2[1], p1, q1
 
     @staticmethod
@@ -445,10 +523,9 @@ class TopK_Values_Approximation_Compressor(Compressor):
         params['N'] = int(N)
 
         print("Tensor", tensor, "size:", params['N'])
-        # wandb.log({"Tensor_shape": tensor_shape})
-        params["layers"].add_data(tensor, params['N'])
+        # params["layers"].add_data(tensor, params['N'])
 
-        if params['N'] >= 0: #25088:
+        if params['N'] >= 35000: #25088:
             abs_values = tf.math.abs(tensor_flatten)
             sorted_indices = tf.argsort(abs_values, axis=0, direction='ASCENDING')
             values_sorted = tf.gather(abs_values, sorted_indices)
@@ -460,9 +537,8 @@ class TopK_Values_Approximation_Compressor(Compressor):
             mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
             sorted_indices = (sorted_indices + 1) * mask
 
-            coefficients = TopK_Values_Approximation_Compressor.double_exponential_fit(X, tf.cast(values_sorted, tf.float64), N)
-            num_of_coefficients = len(coefficients)
-            # coefficients = tf.cast(coefficients, tf.float32)
+            coefficients = Values_Approximation_Compressor.double_exponential_fit(X, tf.cast(values_sorted, tf.float64), N)
+            num_of_coefficients = len(coefficients)     # coefficients = tf.cast(coefficients, tf.float32)
 
             ##################### Logging #####################
             filename = resource_loader.get_path_to_datafile('mpi_lib.so')
@@ -496,12 +572,10 @@ class TopK_Values_Approximation_Compressor(Compressor):
 
     @staticmethod
     def decompress(tensor_compressed, ctx, params):
-        compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
         tensor_shape = ctx
-        # N = tf.math.reduce_prod(tensor_shape)
 
-        if params['N'] >= 0: #25088:
-            message, indices = tf.split(tensor_compressed, [params['message_size'], compressed_tensor_size - params['message_size']])
+        if params['N'] >= 35000: #25088:
+            message, indices = tf.split(tensor_compressed, [params['message_size'], params['N']])
             decompressed_indices = tf.cast(indices, tf.int32)
             negative_indices = tf.where(tf.less(decompressed_indices, 0))
             decompressed_indices = tf.math.abs(decompressed_indices)
@@ -514,15 +588,9 @@ class TopK_Values_Approximation_Compressor(Compressor):
             mask = tf.tensor_scatter_nd_update(tf.ones([params['N']], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
             y_estimates = y_estimates * tf.cast(mask, tf.float64)
             values = tf.reshape(y_estimates, [-1])
-            # decompressed_indices = tf.expand_dims(decompressed_indices, 1)
-            tensor_decompressed = tf.scatter_nd(decompressed_indices, tf.cast(values, tf.float32), tensor_shape)
-            # tensor_size = tf.math.reduce_prod(tensor_shape)
-            # zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
-            # op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
-            # with tf.control_dependencies([op]):
-            #     tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, tf.cast(values, tf.float32))
-            # tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
-
+            decompressed_indices = tf.expand_dims(decompressed_indices, 1)
+            tensor_decompressed = tf.scatter_nd(decompressed_indices, tf.cast(values, tf.float32), [params['N']])
+            tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         else:
             tensor_decompressed = tensor_compressed
 
@@ -1297,7 +1365,6 @@ class DgcCompressor(Compressor):
         return tensor_decompressed
 
 
-
 class AdaqCompressor(Compressor):
     """"""
 
@@ -1525,7 +1592,6 @@ class PowerSGDCompressor(Compressor):
         new_tensor = tf.reshape(new_tensor, tensor_shape)
 
         return new_tensor
-
 
 
 class U8bitCompressor(Compressor):
@@ -2186,4 +2252,4 @@ class Compression(object):
     inceptionn = INCEPTIONNCompressor
     fake = FakeCompressor
     bloom = Bloom_Filter_Compressor
-    topk_values_approximation = TopK_Values_Approximation_Compressor
+    values_approximation = Values_Approximation_Compressor
