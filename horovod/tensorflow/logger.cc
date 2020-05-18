@@ -18,7 +18,7 @@ REGISTER_OP("Logger")
 .Attr("verbosity_frequency: int")
 .Attr("verbosity: int")
 .Input("initial_tensor: float32")
-.Input("coefficients: float64")
+.Input("coefficients: double")
 .Input("step: int64")
 .Doc(R"doc()doc");
 

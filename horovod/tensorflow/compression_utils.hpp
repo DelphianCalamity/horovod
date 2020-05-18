@@ -198,7 +198,7 @@ public:
 //            fprintf(f, "Step: = %d\n\n", step);
 //        }
         auto initial_flat = initial_tensor.flat<float>();
-        auto coefficients_flat = coefficients.flat<float64>();
+        auto coefficients_flat = coefficients.flat<double>();
         str = path + "values.csv";
         f = fopen(str.c_str(),"w");
         for(int i=0; i<N; i++) {
@@ -206,7 +206,7 @@ public:
         }
         fprintf(f, "\n");
         for(int i=0; i<coefficients_flat.size(); i++) {
-            fprintf(f, "%f ", coefficients_flat(i));
+            fprintf(f, "%lf ", coefficients_flat(i));
         }
         fprintf(f, "\n");
         fclose(f);
