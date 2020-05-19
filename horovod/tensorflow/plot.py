@@ -3,53 +3,60 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+import argparse
 import math
+import csv
 
 tf.enable_eager_execution()
-print(tf.executing_eagerly())
 
-path_prefix = "logs/"
-path = path_prefix + "1/step_0/1/"
-with open(path+'log.txt') as f:
-    K = int(next(f).split()[0])
-init_tensor = pd.read_csv(path+'values.csv', header=None, sep="\s+", names=["Y", "Yest"])
+parser = argparse.ArgumentParser()
+# parser.add_argument('--compress_ratio', type=float, default=0.01, help='compress ratio')
+parser.add_argument('--path', type=str, default="./", help='')
+args = parser.parse_args()
 
-# print(init_tensor)
-Y = init_tensor['Y'].to_numpy()
-Yest = init_tensor['Yest'].to_numpy()
+path = args.path
+# compress_ratio = args.compress_ratio
+init_tensor = pd.read_csv(path+'/values.csv', header=None, sep="\n")
+
+csv = open(path+'/values.csv', "r").read()
+rows = csv.split("\n")
+
+Y = np.array([float(x) for x in rows[0].split(" ") if x != ''])
+coefficients = np.array([float(x) for x in rows[1].split(" ") if x != ''])
+# print(Y) ; print(coefficients)
+
 N = Y.size
-_, indices_Y = tf.math.top_k(tf.math.abs(Y), K, sorted=False)
-_, indices_Yest = tf.math.top_k(tf.math.abs(Yest), K, sorted=False)
 
-true_values = tf.gather(Y, indices_Y)
-estimated_values = tf.gather(Yest, indices_Yest)
+y_abs = tf.math.abs(Y)
+mapping = tf.argsort(y_abs, axis=0, direction='ASCENDING', stable=False)
+sorted_Y = tf.gather(y_abs, mapping)
 
-mapping = tf.argsort(Y, axis=0, direction='ASCENDING', stable=False)
-# print(mapping)
-sorted_Y = tf.gather(Y, mapping)
-mapped_estimated_indices = tf.gather(mapping, indices_Yest)
-sorted_Yest = tf.sort(Yest, axis=0, direction='ASCENDING')
-print(indices_Y)
-print(mapped_estimated_indices)
+X = np.array(range(1, N + 1), np.float64)
+y_est_abs = coefficients[0] * tf.math.exp(coefficients[2] * X) + coefficients[1] * tf.math.exp(coefficients[3] * X)
+
+negative_indices = tf.where(tf.less(tf.gather(Y, mapping), 0))
+Nneg = tf.size(negative_indices)
+mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
+y = y_est_abs * tf.cast(mask, tf.float64)
+
+
 plt.rcParams["figure.figsize"] = [20, 10]
 
 # Compute Root Mean Squared Error
-true_values_sent = tf.gather(Y, mapped_estimated_indices)
-rmse = tf.math.sqrt(tf.reduce_sum(tf.math.pow(true_values_sent-estimated_values, 2)))
+# print(Y)
+# print(mapping)
+# print(tf.gather(y, mapping))
+rmse = tf.math.sqrt(tf.reduce_sum(tf.math.pow(Y-tf.gather(y, mapping), 2)))
 print(rmse)
-with open(path_prefix+'rmse.txt', 'a') as f:
+with open(path+'/rmse.txt', 'w') as f:
     f.write(str(rmse) + "\n")
 
-non_topk_errors = np.where(indices_Y.numpy() != mapped_estimated_indices.numpy())
-with open(path_prefix+'non-topk-errors.txt', 'a') as f:
-    f.write(str(non_topk_errors[0].size) + "\n")
-
-
-plt.plot(range(1, N+1), Y, 'c.', markersize=2, label="True")
-plt.plot(indices_Y.numpy(), true_values.numpy(), 'ko', markersize=5, label="Top " + str(K) + " True Values")
-plt.plot(mapped_estimated_indices.numpy(), estimated_values.numpy(), 'mo', markersize=5, label="Top " + str(K) + " Estimated Values")
+mapping = mapping+1
+plt.plot(range(1, N+1), Y, 'c.', markersize=5, label="True")
+plt.plot(mapping.numpy(), y, 'mo', markersize=5, label="Estimated Values")
 plt.plot(range(1, N+1), sorted_Y, 'bo', markersize=6, label="True Sorted")
-plt.plot(range(1, N+1), sorted_Yest, 'ro', markersize=6, label="Estimated Sorted")
+plt.plot(range(1, N+1), y_est_abs, 'ro', markersize=6, label="Estimated Sorted")
 plt.legend()
 # plt.show()
 plt.savefig(path+'gradient.png')
+

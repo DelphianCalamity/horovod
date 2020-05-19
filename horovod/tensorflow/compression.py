@@ -546,7 +546,7 @@ class Values_Approximation_Compressor(Compressor):
             logger = library.logger
             # y = coefficients[0] * tf.math.exp(coefficients[2] * X) + coefficients[1] * tf.math.exp(coefficients[3] * X)
             # y = y * tf.cast(mask, tf.float64)
-            logger = logger(tensor_flatten, tf.cast(coefficients, tf.float32), tf.train.get_or_create_global_step(),
+            logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
                             bloom_logs_path=params['bloom_logs_path'],
                             gradient_id=params['gradient_id'],
                             verbosity_frequency=params['bloom_verbosity_frequency'],
