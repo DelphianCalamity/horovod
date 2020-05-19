@@ -66,10 +66,8 @@ def compress(tensor, params):
 		filename = resource_loader.get_path_to_datafile('./logger.so')
 		library = load_library.load_op_library(filename)
 		logger = library.logger
-		logger = logger(tensor_flatten, y_estimates, theta_estimates,
+		logger = logger(tensor_flatten, tf.cast(theta_estimates, tf.float64),
 						0,
-						num_of_coefficients=num_of_coefficients,
-						K=k,
 						bloom_logs_path="./logs",
 						gradient_id=1,
 						verbosity_frequency=1,
