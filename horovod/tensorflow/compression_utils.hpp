@@ -202,11 +202,11 @@ public:
         str = path + "values.csv";
         f = fopen(str.c_str(),"w");
         for(int i=0; i<N; i++) {
-            fprintf(f, "%f ", initial_flat(i));
+            fprintf(f, "%.*f ", initial_flat(i));
         }
         fprintf(f, "\n");
         for(int i=0; i<coefficients_flat.size(); i++) {
-            fprintf(f, "%lf ", coefficients_flat(i));
+            fprintf(f, "%.*f ", coefficients_flat(i));
         }
         fprintf(f, "\n");
         fclose(f);
