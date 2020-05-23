@@ -138,7 +138,7 @@ class RandomkCompressor(Compressor):
 
 
 class TopKCompressor(Compressor):
-    """"""
+
     @staticmethod
     def compress(tensor, params):
         tensor_shape = tf.shape(tensor)
@@ -164,27 +164,23 @@ class TopKCompressor(Compressor):
                 values = tf.bitcast(values, tf.int32)
                 values_shape = tf.shape(values)
                 indices = tf.bitcast(indices, tf.uint32)
-                # indices = tf.Print(indices, [indices], "Compress Indices:")
                 compressed_indices = integer_compressor(indices,
-                                                          tf.train.get_or_create_global_step(),
-                                                          logfile_suffix=params['logfile_suffix'],
-                                                          logs_path_suffix=params['logs_path_suffix'],
-                                                          verbosity=params['verbosity'],
-                                                          code=params['code'])
+                                                        tf.train.get_or_create_global_step(),
+                                                        logs_path=params['bloom_logs_path'],
+                                                        gradient_id=params['gradient_id'],
+                                                        verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                        verbosity=params['bloom_verbosity'],
+                                                        rank=rank(),
+                                                        code=params['code'])
                 compressed_indices = tf.bitcast(compressed_indices, tf.int32)
-                # compressed_indices = tf.Print(compressed_indices, [compressed_indices], "Compress compressed Indices:")
 
             elif params['encoding'] == "rle_compression":
                 if params['code'] == "0_8":
                     rle_compressor = library.rle_compressor_v0_code8
-                    # print("\n\nShape PreFloat32\n\n:", values.shape)
                     values = tf.bitcast(values, tf.uint8)
                     values_shape = tf.shape(values)
-                    # print("\n\nShape Uint8\n\n:", values.shape)
                     values = tf.reshape(values, [-1])
                     params['values_size'] = k*4
-                    # print(params['values_size'])
-                    # print("\n\nShape uint8 flatten\n\n:", values.shape)
 
                 elif params['code'] == "1_8":
                     rle_compressor = library.rle_compressor_v1_code8
@@ -204,10 +200,12 @@ class TopKCompressor(Compressor):
                     params['values_size'] = k
 
                 compressed_indices = rle_compressor(indices, elemnum,
-                                                      tf.train.get_or_create_global_step(),
-                                                      logfile_suffix=params['logfile_suffix'],
-                                                      logs_path_suffix=params['logs_path_suffix'],
-                                                      verbosity=params['verbosity'])
+                                                    tf.train.get_or_create_global_step(),
+                                                    logs_path=params['bloom_logs_path'],
+                                                    gradient_id=params['gradient_id'],
+                                                    verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                    verbosity=params['bloom_verbosity'],
+                                                    rank=rank())
         else:
             compressed_indices = indices
             values = tf.bitcast(values, tf.int32)
@@ -238,11 +236,13 @@ class TopKCompressor(Compressor):
                 indices = tf.bitcast(indices, tf.uint32)
                 decompressed_indices = integer_decompressor(indices, params['topk_k'],
                                                             tf.train.get_or_create_global_step(),
-                                                            logfile_suffix=params['logfile_suffix'],
-                                                            logs_path_suffix=params['logs_path_suffix'],
-                                                            suffix=params['suffix'],
-                                                            verbosity=params['verbosity'],
+                                                            logs_path=params['bloom_logs_path'],
+                                                            gradient_id=params['gradient_id'],
+                                                            verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                            verbosity=params['bloom_verbosity'],
+                                                            rank=rank(),
                                                             code=params['code'])
+
                 decompressed_indices = tf.bitcast(decompressed_indices, tf.int32)
 
             elif params['encoding'] == "rle_compression":
@@ -257,18 +257,18 @@ class TopKCompressor(Compressor):
 
                 decompressed_indices = rle_decompressor(indices, params['topk_k'],
                                                         tf.train.get_or_create_global_step(),
-                                                        logfile_suffix=params['logfile_suffix'],
-                                                        logs_path_suffix=params['logs_path_suffix'],
-                                                        suffix=params['suffix'],
-                                                        verbosity=params['verbosity'])
+                                                        logs_path=params['bloom_logs_path'],
+                                                        gradient_id=params['gradient_id'],
+                                                        verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                        verbosity=params['bloom_verbosity'],
+                                                        rank=rank())
         else:
             decompressed_indices = indices
 
-        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
-        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
-        with tf.control_dependencies([op]):
-            tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, values)
+        decompressed_indices = tf.expand_dims(decompressed_indices, 1)
+        tensor_decompressed = tf.scatter_nd(decompressed_indices, values, [tensor_size])
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+
         return tensor_decompressed
 
 
@@ -468,10 +468,14 @@ class Values_Approximation_Helper(Compressor):
 
     @staticmethod
     def is_convolutional(model, N):
-        if model == "resnet2_v2":
-            conv_sizes = [432, 2304, 4608, 9216, 18432, 36864]
+        print(model)
+        if model == "resnet20_v2":
+            conv_sizes = [2304, 4608, 9216, 18432, 36864] #432
         elif model == "vgg16":
             conv_sizes = [1728, 36864, 73728, 147456, 294912, 589824, 1179648, 2359296]
+        elif model == "resnet50":
+            conv_sizes = [9408, 16384, 4096, 36864, 131072, 32768, 147456, 65536, 524288,
+                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048]
 
         if N in conv_sizes:
             return True
@@ -486,10 +490,9 @@ class Values_Approximation_Compressor(Compressor):
         N = tensor_flatten.get_shape().as_list()[0]
         params['N'] = int(N)
         print("Tensor", tensor, "size:", params['N'])
-        # params["layers"].add_data(tensor, params['N'])
 
         # Values Approximation
-        if Values_Approximation_Helper.is_convolutional(params['model'], params['N']):
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
             # Derive "values" and "mapping" according to compression method
             abs_values = tf.math.abs(tensor_flatten)
             mapping = tf.argsort(abs_values, axis=0, direction='ASCENDING')
@@ -497,7 +500,7 @@ class Values_Approximation_Compressor(Compressor):
 
             #  Indices have a negative sign if they correspond to negative values and positive otherwise
             negative_indices = tf.where(tf.less(tf.gather(tensor_flatten, mapping), 0))
-            X = np.array(range(1, N+1), np.float64)
+            X = tf.cast(tf.range(1, N+1), tf.float64)
             Nneg = tf.size(negative_indices)
             mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices, -tf.ones(Nneg, dtype=tf.int32))
             mapping = (mapping + 1) * mask
@@ -537,7 +540,7 @@ class Values_Approximation_Compressor(Compressor):
     def decompress(tensor_compressed, ctx, params):
         tensor_shape = ctx
 
-        if Values_Approximation_Helper.is_convolutional(params['model'], params['N']):
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
             message, indices = tf.split(tensor_compressed, [params['message_size'], params['N']])
             decompressed_indices = tf.cast(indices, tf.int32)
             negative_indices = tf.where(tf.less(decompressed_indices, 0))
@@ -574,7 +577,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
         abs_values = tf.math.abs(tensor_flatten)
 
         # Values Approximation
-        if Values_Approximation_Helper.is_convolutional(params['model'], params['N']):
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
             top_values, mapping = tf.math.top_k(abs_values, K, sorted=False)
             sorted_mapping = tf.argsort(top_values, axis=0, direction='ASCENDING')
             values = tf.gather(top_values, sorted_mapping)
@@ -627,11 +630,11 @@ class TopK_Values_Approximation_Compressor(Compressor):
     @staticmethod
     def decompress(tensor_compressed, ctx, params):
         tensor_shape = ctx
-        tensor_compressed_size = tf.math.reduce_prod(tensor_compressed.get_shape())
+        tensor_compressed_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
         message, indices = tf.split(tensor_compressed, [params['message_size'], tensor_compressed_size-params['message_size']])
         decompressed_indices = tf.cast(indices, tf.int32)
 
-        if Values_Approximation_Helper.is_convolutional(params['model'], params['N']):
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
             negative_indices = tf.where(tf.less(decompressed_indices, 0))
             decompressed_indices = tf.math.abs(decompressed_indices)
             decompressed_indices = decompressed_indices - 1
@@ -667,7 +670,7 @@ class Values_Approximation_Logit_Compressor(Compressor):
         print("Tensor", tensor, "size:", params['N'])
         # params["layers"].add_data(tensor, params['N'])
 
-        if Values_Approximation_Helper.is_convolutional(params['model'], params['N']):
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
 
             # p0 = [[0.004, -0.01, -0.04]]
             p0 = [[0.001, 0.1, 0.00001]]
@@ -711,7 +714,7 @@ class Values_Approximation_Logit_Compressor(Compressor):
     def decompress(tensor_compressed, ctx, params):
         tensor_shape = ctx
 
-        if Values_Approximation_Helper.is_convolutional(params['model'], params['N']):
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
             message, indices = tf.split(tensor_compressed, [params['message_size'], params['N']])
             decompressed_indices = tf.cast(indices, tf.int32)
             message = tf.expand_dims(message, 1)
@@ -2081,3 +2084,4 @@ class Compression(object):
     bloom = Bloom_Filter_Compressor
     values_approximation = Values_Approximation_Compressor
     values_approximation_logit = Values_Approximation_Logit_Compressor
+    topk_values_approximation = TopK_Values_Approximation_Compressor

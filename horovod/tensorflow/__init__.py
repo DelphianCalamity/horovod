@@ -87,7 +87,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'bloom_verbosity_frequency': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY_FREQUENCY', 0)),
         'bloom_verbosity': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY', 0)),
         'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
-        'encoding': os.environ.get('HOROVOD_BITSTREAM_ENCODING', None)
+        'encoding': os.environ.get('HOROVOD_BITSTREAM_ENCODING', None),
+        'code': os.environ.get('HOROVOD_BITSTREAM_CODE', None)
+
     }
     if params is not None:
         for argument in params_env:
@@ -122,12 +124,14 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["bloom"] = Compression.bloom
     comp_dict["values_approximation"] = Compression.values_approximation
     comp_dict["values_approximation_logit"] = Compression.values_approximation_logit
+    comp_dict["topk_values_approximation"] = Compression.topk_values_approximation
+
 
     # testing
     if not params['compress_state']:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
                        'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch',
-                       'bloom', 'values_approximation', 'values_approximation_logit']:
+                       'bloom', 'values_approximation', 'values_approximation_logit', 'topk_values_approximation']:
             comp_dict[method] = Compression.fake
 
     default_params = {}

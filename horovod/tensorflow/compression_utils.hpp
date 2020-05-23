@@ -92,6 +92,7 @@ public:
         }
     }
 
+    // Logging for values approximation
     static void logging_compressor(bloom::OrdinaryBloomFilter<uint32_t>& bloom, int N, int K, int output_concat_dim,
     const Tensor& initial_tensor, const Tensor& indices, const Tensor& values, std::vector<int>& new_values, std::vector<int>& selected_indices,
     std::string bloom_logs_path, int gradient_id, int64 step, std::string policy, int rank, int verbosity) {
@@ -174,6 +175,7 @@ public:
         }
     }
 
+    // Logging for values approximation
     static void logging(int N, const Tensor& initial_tensor, const Tensor& coefficients,
     std::string bloom_logs_path, int gradient_id, int64 step, int rank, int verbosity) {
 
@@ -213,6 +215,80 @@ public:
         }
         fclose(f);
     }
+
+    // Logging for bitstream compression
+    static void logging_bitstream_compressor(const Tensor& indices_tensor, int output_concat_dim, int tensor_size_bytes,
+    std::vector<uint8_t>& bitstream, std::vector<int>* lengths, const Tensor* output, int initial_tensor_size,
+    std::string logs_path, int gradient_id, int64 step, int rank, int verbosity) {
+
+        FILE* f;
+        std::string str;
+        std::string str_gradient_id = std::to_string(gradient_id);
+        std::string str_step = std::to_string(step);
+        std::string str_rank = std::to_string(rank);
+
+        std::string path = logs_path + "/" + str_rank + "/step_" + str_step + "/" + str_gradient_id + "/";
+        std::string cmd = "mkdir -p " + path;
+        int systemRet = system(cmd.c_str());
+        if(systemRet == -1){
+            perror("mkdir failed");
+        }
+        if (verbosity > 1) {
+            str = path + "RleCompressor_logs.txt";
+            f = fopen(str.c_str(),"w");
+            auto indices_tensor_flat = indices_tensor.flat<int32_t>();
+            fprintf(f, "indices_tensor: %s\n", indices_tensor.DebugString(indices_tensor_flat.size()).c_str());
+            fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
+            CompressionUtilities::fprint(f, tensor_size_bytes, bitstream);
+            if (lengths != NULL) {
+                fprintf(f, "Lengths:\n");
+                CompressionUtilities::print_vector(lengths->data(), lengths->size(), f);
+            }
+            auto output_flat = output->template flat<uint8>();
+            fprintf(f, "Encoded lengths: %s\n", output->DebugString(output_flat.size()).c_str());
+            fprintf(f, "\n\n########################################################################################\n\n");
+            fclose(f);
+        }
+
+        str = path + "stats.txt";
+        f = fopen(str.c_str(),"w");
+        fprintf(f, "Initial_Size: %d  Final_Size: %d\n", initial_tensor_size,  output_concat_dim*8 + 32); // in bits // worker sends the size of the encoded tensor
+        fclose(f);
+    }
+
+    static void logging_bitstream_decompressor(const Tensor& encoding, int output_concat_dim, std::vector<int>* lengths,
+    const Tensor* output, std::string logs_path, int gradient_id, int64 step, int rank, int verbosity) {
+
+        FILE* f;
+        std::string str;
+        std::string str_gradient_id = std::to_string(gradient_id);
+        std::string str_step = std::to_string(step);
+        std::string str_rank = std::to_string(rank);
+
+        std::string path = logs_path + "/" + str_rank + "/step_" + str_step + "/" + str_gradient_id + "/";
+        std::string cmd = "mkdir -p " + path;
+        int systemRet = system(cmd.c_str());
+        if(systemRet == -1){
+            perror("mkdir failed");
+        }
+        if (verbosity > 1) {
+            str = path + "RleDecompressor_logs.txt";
+            f = fopen(str.c_str(),"w");
+
+            auto encoding_flat = encoding.flat<uint8_t>();
+            fprintf(f, "encoding_flat: %s\n", encoding.DebugString(encoding_flat.size()).c_str());
+            fprintf(f, "Output_concat_size: = %d\n\n", output_concat_dim);
+            if (lengths != NULL) {
+                fprintf(f, "Lengths:\n");
+                CompressionUtilities::print_vector(lengths->data(), lengths->size(), f);
+            }
+            auto output_flat = output->template flat<int32>();
+            fprintf(f, "Indices: %s\n", output->DebugString(output_flat.size()).c_str());
+            fprintf(f, "\n\n########################################################################################\n\n");
+            fclose(f);
+        }
+    }
+
 };
 
 #endif

@@ -18,7 +18,7 @@ Y = pd.read_csv(path+'/values.csv', header=None, sep="\n")[0].values
 coefficients = pd.read_csv(path+'/coefficients.csv', header=None, sep="\n")[0].values
 #print(Y) ; print(coefficients)
 N = Y.size
-compress_ratio = 0.1
+compress_ratio = 0.2
 K = max(1, int(N*compress_ratio))  # If compress ratio is set to 1 then K=N
 
 y_abs = np.abs(Y)
