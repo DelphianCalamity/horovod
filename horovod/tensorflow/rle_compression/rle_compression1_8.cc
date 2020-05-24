@@ -226,7 +226,7 @@ public:
         int step = step_tensor.flat<int64>()(0);
         if (verbosity_frequency != 0 && step % verbosity_frequency == 0 ) {
             CompressionUtilities::logging_bitstream_decompressor(encoding, output_concat_dim, &lengths,
-            output, logs_path, gradient_id, step, rank, verbosity);
+            output, logs_path, gradient_id, step, rank, suffix, verbosity);
         }
         // *********************** For Debugging ********************** //
     }

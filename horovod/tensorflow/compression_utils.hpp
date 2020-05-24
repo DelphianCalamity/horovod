@@ -257,7 +257,7 @@ public:
     }
 
     static void logging_bitstream_decompressor(const Tensor& encoding, int output_concat_dim, std::vector<int>* lengths,
-    const Tensor* output, std::string logs_path, int gradient_id, int64 step, int rank, int verbosity) {
+    const Tensor* output, std::string logs_path, int gradient_id, int64 step, int rank, int suffix, int verbosity) {
 
         FILE* f;
         std::string str;
@@ -272,7 +272,7 @@ public:
             perror("mkdir failed");
         }
         if (verbosity > 1) {
-            str = path + "RleDecompressor_logs.txt";
+            str = path + "RleDecompressor_logs" + "_" + std::to_string(suffix) + ".txt";
             f = fopen(str.c_str(),"w");
 
             auto encoding_flat = encoding.flat<uint8_t>();

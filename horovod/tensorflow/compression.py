@@ -240,6 +240,7 @@ class TopKCompressor(Compressor):
                                                             gradient_id=params['gradient_id'],
                                                             verbosity_frequency=params['bloom_verbosity_frequency'],
                                                             verbosity=params['bloom_verbosity'],
+                                                            suffix=params['suffix'],
                                                             rank=rank(),
                                                             code=params['code'])
 
@@ -261,6 +262,7 @@ class TopKCompressor(Compressor):
                                                         gradient_id=params['gradient_id'],
                                                         verbosity_frequency=params['bloom_verbosity_frequency'],
                                                         verbosity=params['bloom_verbosity'],
+                                                        suffix=params['suffix'],
                                                         rank=rank())
         else:
             decompressed_indices = indices
@@ -474,12 +476,13 @@ class Values_Approximation_Helper(Compressor):
         elif model == "vgg16":
             conv_sizes = [1728, 36864, 73728, 147456, 294912, 589824, 1179648, 2359296]
         elif model == "resnet50":
-            conv_sizes = [9408, 16384, 4096, 36864, 131072, 32768, 147456, 65536, 524288,
-                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048]
+            conv_sizes = [9408, 16384, 36864, 131072, 32768, 147456, 65536, 524288,
+                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048]   #4096
 
         if N in conv_sizes:
             return True
         return False
+
 
 class Values_Approximation_Compressor(Compressor):
 
@@ -561,6 +564,7 @@ class Values_Approximation_Compressor(Compressor):
             tensor_decompressed = tensor_compressed
 
         return tensor_decompressed
+
 
 class TopK_Values_Approximation_Compressor(Compressor):
 
@@ -797,6 +801,7 @@ class SignSGDCompressor(Compressor):
         sign_decode = tf.cast(sign_encode, dtype=tf.float32) * 2.0 - 1.0
         tensor_decompressed = tf.reshape(sign_decode, tensor_shape)
         return tensor_decompressed
+
 
 class EFSignSGDCompressor(Compressor):
     """"""
@@ -1093,6 +1098,7 @@ class TerngradCompressor(Compressor):
         tensor_decompressed = sign * scaler
         tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
+
 
 class DgcCompressor(Compressor):
     """"""
