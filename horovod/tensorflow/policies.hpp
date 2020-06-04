@@ -115,7 +115,6 @@ public:
         bool compromised;
         int random, left = K;
         std::unordered_set<int> selected_indices_set;
-//print_2d_vector(conflict_sets_ordered);
         while (left > 0) {             // Don't stop until you have selected K positives
             for (int i=0; i<conflict_sets_ordered.size() && left>0; i++) {
                 std::unordered_set<int>& cset = conflict_sets_ordered[i];
@@ -127,15 +126,11 @@ public:
                     selected_indices_set.insert(*it);
                     cset.erase(it);
                     left--;
-//printf("\nChoosing: %d\n\n", *it);
                 }
-//print_2d_vector(conflict_sets_ordered);
-//printf("\n\n############################\n\n");
             }
         }
         std::copy(selected_indices_set.begin(), selected_indices_set.end(), std::back_inserter(selected_indices));
         std::sort(selected_indices.begin(), selected_indices.end());
-//print_vector(selected_indices);
     }
 
     static void conflict_sets_policy(int N, int K, int seed, bloom::OrdinaryBloomFilter<uint32_t>& bloom, std::vector<int>& selected_indices) {
@@ -161,6 +156,28 @@ public:
         }
      }
 
+    static void randomK(int N, int K, int64 step, bloom::OrdinaryBloomFilter<uint32_t>& bloom,
+                                    std::vector<int>& selected_indices) {
+        // Iterating over the universe and creating P
+        std::vector<int> P;
+        for (size_t i=0; i<N; i++) {
+            if (bloom.Query(i)) {  // If it is positive
+                P.push_back(i);
+            }
+        }
+        // Randomly choose K indices from P
+        std::default_random_engine generator;
+        generator.seed(step);
+        int random;
+        for (int i=0; i<K; i++) {
+            std::uniform_int_distribution<int> distribution(0, P.size()-1);
+            random = distribution(generator);
+            auto it = std::begin(P); std::advance(it, random);
+            selected_indices.push_back(*it);
+            P.erase(it);
+        }
+     }
+
      static void select_indices(std::string policy, int N, int K, int64 step,
                                 bloom::OrdinaryBloomFilter<uint32_t>& bloom,
                                 std::vector<int>& selected_indices) {
@@ -168,6 +185,8 @@ public:
             conflict_sets_policy(N, K, step, bloom, selected_indices);
         } else if (policy == "leftmostK") {
             leftmostK(N, K, bloom, selected_indices);
+        } else if (policy == "randomK") {
+            randomK(N, K, step, bloom, selected_indices);
         }
     }
 

@@ -206,15 +206,17 @@ class TopKCompressor(Compressor):
                                                     verbosity_frequency=params['bloom_verbosity_frequency'],
                                                     verbosity=params['bloom_verbosity'],
                                                     rank=rank())
+            params['tensors_size_are_same'] = False
+
         else:
             compressed_indices = indices
             values = tf.bitcast(values, tf.int32)
             params['values_size'] = k
             values_shape = tf.shape(values)
+            params['tensors_size_are_same'] = True
 
         tensor_compressed = tf.concat([values, compressed_indices], 0)
         ctx = [tensor_shape, values_shape]
-        params['tensors_size_are_same'] = True
         return tensor_compressed, ctx
 
     @staticmethod
@@ -476,8 +478,8 @@ class Values_Approximation_Helper(Compressor):
         elif model == "vgg16":
             conv_sizes = [1728, 36864, 73728, 147456, 294912, 589824, 1179648, 2359296]
         elif model == "resnet50":
-            conv_sizes = [9408, 16384, 36864, 131072, 32768, 147456, 65536, 524288,
-                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048]   #4096
+            conv_sizes = [16384, 36864, 131072, 32768, 147456, 65536, 524288,
+                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048]   #4096 #9408
 
         if N in conv_sizes:
             return True
@@ -496,7 +498,6 @@ class Values_Approximation_Compressor(Compressor):
 
         # Values Approximation
         if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
-            # Derive "values" and "mapping" according to compression method
             abs_values = tf.math.abs(tensor_flatten)
             mapping = tf.argsort(abs_values, axis=0, direction='ASCENDING')
             values = tf.gather(abs_values, mapping)
