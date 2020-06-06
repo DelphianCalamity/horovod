@@ -472,18 +472,19 @@ class Values_Approximation_Helper(Compressor):
 
     @staticmethod
     def find_breaks(y_train, num_of_segments, N):
-        b = tf.constant(0, shape=(1,), dtype=tf.int64)
-        N = tf.constant(N, shape=(1,), dtype=tf.int64)
+        b = tf.constant(0, shape=(1,), dtype=tf.int32)
+        N = tf.constant(N, shape=(1,), dtype=tf.int32)
         y = y_train
-        break_points = tf.zeros(num_of_segments + 1, tf.int64)
+        break_points = tf.zeros(num_of_segments + 1, tf.int32)
         for i in range(num_of_segments - 1):
-            b = b + tf.math.argmax(tf.abs(tf.linspace(y[0], y[-1], tf.size(y)) - y))
+            a = tf.math.argmax(tf.abs(tf.linspace(y[0], y[-1], tf.size(y)) - y))
+            b = b + tf.cast(a, tf.int32) #tf.math.argmax(tf.abs(tf.linspace(y[0], y[-1], tf.size(y)) - y))
             break_points = tf.tensor_scatter_nd_update(break_points, [[i + 1]], b)
             y = tf.gather(y_train, tf.range(b[0], N[0]))
         break_points = tf.tensor_scatter_nd_update(break_points, [[num_of_segments]], N)
         sizes = [break_points[i + 1] - break_points[i] for i in range(num_of_segments)]
-        print(break_points)
-        print(sizes)
+        # print(break_points)
+        # print(sizes)
         return break_points, sizes
 
     @staticmethod
@@ -611,6 +612,7 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
         print("Tensor", tensor, "size:", params['N'])
 
         if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
+
             abs_values = tf.math.abs(tensor_flatten)
             mapping = tf.argsort(abs_values, axis=0, direction='ASCENDING')
             values = tf.gather(abs_values, mapping)
@@ -623,7 +625,6 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
 
             # Fitting the curve segments
             break_points, sizes = Values_Approximation_Helper.find_breaks(values, params['num_of_segments'], N)
-            print(sizes)
             coefficients = []
             for i in range(params['num_of_segments']):
                 x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.int64), [1, sizes[i]])
@@ -668,13 +669,13 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
                                                                         params['N']])
             coefficients = tf.reshape(coefficients, [params['num_of_segments'], params['polynomial_degree']])
             decompressed_indices = tf.cast(indices, tf.int32)
+            sizes = tf.cast(sizes, tf.int32)
             negative_indices = tf.where(tf.less(decompressed_indices, 0))
             decompressed_indices = tf.math.abs(decompressed_indices)
             decompressed_indices = decompressed_indices - 1
             Nneg = tf.size(negative_indices)
             mask = tf.tensor_scatter_nd_update(tf.ones([params['N']], dtype=tf.int32), negative_indices,
                                                -tf.ones(Nneg, dtype=tf.int32))
-            sizes = tf.cast(sizes, tf.int32)
             y_segments = []
             for i in range(params['num_of_segments']):
                 x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.int64), [1, sizes[i]])

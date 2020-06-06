@@ -89,8 +89,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
         'encoding': os.environ.get('HOROVOD_BITSTREAM_ENCODING', None),
         'code': os.environ.get('HOROVOD_BITSTREAM_CODE', None),
-        'num_of_segments': os.environ.get('HOROVOD_SEGMENTS', None),
-        'polynomial_degree': os.environ.get('HOROVOD_POLYNOMIAL_DEGREE', None)
+        'num_of_segments': int(os.environ.get('HOROVOD_SEGMENTS', None)),
+        'polynomial_degree': int(os.environ.get('HOROVOD_POLYNOMIAL_DEGREE', None))
     }
     if params is not None:
         for argument in params_env:
