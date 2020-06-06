@@ -182,22 +182,22 @@ class TopKCompressor(Compressor):
                     values = tf.reshape(values, [-1])
                     params['values_size'] = k*4
 
-                elif params['code'] == "1_8":
-                    rle_compressor = library.rle_compressor_v1_code8
-                    values = tf.bitcast(values, tf.uint8)
-                    values_shape = tf.shape(values)
-                    values = tf.reshape(values, [-1])
-                    params['values_size'] = k*4
-
-                elif params['code'] == "0_32":
-                    rle_compressor = library.rle_compressor_v0_code32
-                    values = tf.bitcast(values, tf.int32)
-                    params['values_size'] = k
-
-                elif params['code'] == "1_32":
-                    rle_compressor = library.rle_compressor_v1_code32
-                    values = tf.bitcast(values, tf.int32)
-                    params['values_size'] = k
+                # elif params['code'] == "1_8":
+                #     rle_compressor = library.rle_compressor_v1_code8
+                #     values = tf.bitcast(values, tf.uint8)
+                #     values_shape = tf.shape(values)
+                #     values = tf.reshape(values, [-1])
+                #     params['values_size'] = k*4
+                #
+                # elif params['code'] == "0_32":
+                #     rle_compressor = library.rle_compressor_v0_code32
+                #     values = tf.bitcast(values, tf.int32)
+                #     params['values_size'] = k
+                #
+                # elif params['code'] == "1_32":
+                #     rle_compressor = library.rle_compressor_v1_code32
+                #     values = tf.bitcast(values, tf.int32)
+                #     params['values_size'] = k
 
                 compressed_indices = rle_compressor(indices, elemnum,
                                                     tf.train.get_or_create_global_step(),
@@ -269,10 +269,15 @@ class TopKCompressor(Compressor):
         else:
             decompressed_indices = indices
 
-        decompressed_indices = tf.expand_dims(decompressed_indices, 1)
-        tensor_decompressed = tf.scatter_nd(decompressed_indices, values, [tensor_size])
-        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        # decompressed_indices = tf.expand_dims(decompressed_indices, 1)
+        # tensor_decompressed = tf.scatter_nd(decompressed_indices, values, [tensor_size])
+        # tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
 
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
+        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        with tf.control_dependencies([op]):
+            tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, values)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
         return tensor_decompressed
 
 
@@ -453,6 +458,35 @@ class Values_Approximation_Helper(Compressor):
         return tf.cast(b * tf.math.exp(c * X), dtype=tf.float64)
 
     @staticmethod
+    def polynomial_basis(X, a):
+        return tf.cast(tf.pow(X, a), dtype=tf.float64)
+
+    @staticmethod
+    def GetInputMatrix_Polynomial(xcol, x):
+        N = tf.size(x)
+        Xtrans = tf.ones([1, N], tf.float64)
+        for i in range(1, xcol):
+            basis = Values_Approximation_Helper.polynomial_basis(x, i)
+            Xtrans = tf.concat([Xtrans, basis], axis=0)
+        return tf.transpose(Xtrans)
+
+    @staticmethod
+    def find_breaks(y_train, num_of_segments, N):
+        b = tf.constant(0, shape=(1,), dtype=tf.int64)
+        N = tf.constant(N, shape=(1,), dtype=tf.int64)
+        y = y_train
+        break_points = tf.zeros(num_of_segments + 1, tf.int64)
+        for i in range(num_of_segments - 1):
+            b = b + tf.math.argmax(tf.abs(tf.linspace(y[0], y[-1], tf.size(y)) - y))
+            break_points = tf.tensor_scatter_nd_update(break_points, [[i + 1]], b)
+            y = tf.gather(y_train, tf.range(b[0], N[0]))
+        break_points = tf.tensor_scatter_nd_update(break_points, [[num_of_segments]], N)
+        sizes = [break_points[i + 1] - break_points[i] for i in range(num_of_segments)]
+        print(break_points)
+        print(sizes)
+        return break_points, sizes
+
+    @staticmethod
     def GetInputMatrix(x, p0, N):
         Xtrans = tf.ones([1, N], tf.float64)  # [np.ones(N)] #{1}
         for [a, b, c] in p0:
@@ -566,6 +600,96 @@ class Values_Approximation_Compressor(Compressor):
 
         return tensor_decompressed
 
+class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
+
+    @staticmethod
+    def compress(tensor, params):
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        N = tensor_flatten.get_shape().as_list()[0]
+        params['N'] = int(N)
+        print("Tensor", tensor, "size:", params['N'])
+
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
+            abs_values = tf.math.abs(tensor_flatten)
+            mapping = tf.argsort(abs_values, axis=0, direction='ASCENDING')
+            values = tf.gather(abs_values, mapping)
+            # Indices have a negative sign if they correspond to negative values and positive otherwise
+            negative_indices = tf.where(tf.less(tf.gather(tensor_flatten, mapping), 0))
+            Nneg = tf.size(negative_indices)
+            mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices,
+                                               -tf.ones(Nneg, dtype=tf.int32))
+            mapping = (mapping + 1) * mask
+
+            # Fitting the curve segments
+            break_points, sizes = Values_Approximation_Helper.find_breaks(values, params['num_of_segments'], N)
+            print(sizes)
+            coefficients = []
+            for i in range(params['num_of_segments']):
+                x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.int64), [1, sizes[i]])
+                X = Values_Approximation_Helper.GetInputMatrix_Polynomial(params['polynomial_degree'], x)
+                y = tf.reshape(values[break_points[i]: break_points[i + 1]], [sizes[i], 1])
+                coefficients += [Values_Approximation_Helper.LeastSquares(X, tf.cast(y, tf.float64))]
+            coefficients = tf.convert_to_tensor(coefficients)
+            coefficients = tf.reshape(coefficients, [-1])
+
+            ##################### Logging #####################
+            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            library = load_library.load_op_library(filename)
+            logger = library.logger
+            logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
+                            bloom_logs_path=params['bloom_logs_path'],
+                            gradient_id=params['gradient_id'],
+                            verbosity_frequency=params['bloom_verbosity_frequency'],
+                            verbosity=params['bloom_verbosity'],
+                            rank=rank())
+            ##################### / Logging #####################
+
+            compressed_indices = mapping  # Possible indices compression
+            with tf.control_dependencies([logger]):
+                sizes = tf.cast(sizes, tf.float64)
+                compressed_indices = tf.cast(compressed_indices, tf.float64)
+                tensor_compressed = tf.concat([sizes, coefficients, compressed_indices], 0)
+        else:
+            tensor_compressed = tensor
+
+        ctx = tensor_shape
+        params['tensors_size_are_same'] = True
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+        tensor_shape = ctx
+
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
+            sizes, coefficients, indices = tf.split(tensor_compressed, [params['num_of_segments'],
+                                                                        params['polynomial_degree'] * params[
+                                                                            'num_of_segments'],
+                                                                        params['N']])
+            coefficients = tf.reshape(coefficients, [params['num_of_segments'], params['polynomial_degree']])
+            decompressed_indices = tf.cast(indices, tf.int32)
+            negative_indices = tf.where(tf.less(decompressed_indices, 0))
+            decompressed_indices = tf.math.abs(decompressed_indices)
+            decompressed_indices = decompressed_indices - 1
+            Nneg = tf.size(negative_indices)
+            mask = tf.tensor_scatter_nd_update(tf.ones([params['N']], dtype=tf.int32), negative_indices,
+                                               -tf.ones(Nneg, dtype=tf.int32))
+            sizes = tf.cast(sizes, tf.int32)
+            y_segments = []
+            for i in range(params['num_of_segments']):
+                x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.int64), [1, sizes[i]])
+                X = Values_Approximation_Helper.GetInputMatrix_Polynomial(params['polynomial_degree'], x)
+                y_segments += [tf.matmul(X, tf.reshape(coefficients[i], [params['polynomial_degree'], 1]))]
+            values = tf.reshape(tf.concat(y_segments, axis=0), [params['N']])
+            values = values * tf.cast(mask, tf.float64)
+            decompressed_indices = tf.expand_dims(decompressed_indices, 1)
+            tensor_decompressed = tf.scatter_nd(decompressed_indices, tf.cast(values, tf.float32), [params['N']])
+            tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        else:
+            tensor_decompressed = tensor_compressed
+
+        return tensor_decompressed
+
 
 class TopK_Values_Approximation_Compressor(Compressor):
 
@@ -661,9 +785,118 @@ class TopK_Values_Approximation_Compressor(Compressor):
         return tensor_decompressed
 
 
+class Two_TopK_Values_Approximation_Compressor(Compressor):
+
+    @staticmethod
+    def compress(tensor, params):
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        N = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
+        K = max(1, int(N*compress_ratio))     # If compress ratio is set to 1 then K=N
+        params['N'] = int(N) ; params['K'] = K
+        print("Tensor", tensor, "size:", params['N'])
+
+        abs_values = tf.math.abs(tensor_flatten)
+
+        # Values Approximation
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
+            _, mapping = tf.math.top_k(abs_values, K, sorted=False)
+            top_values = tf.gather(tensor_flatten, mapping)
+
+            sorted_mapping = tf.argsort(top_values, axis=0, direction='ASCENDING')
+            values = tf.gather(top_values, sorted_mapping)
+            mapping = tf.gather(mapping, sorted_mapping)
+
+            # Indices have a negative sign if they correspond to negative values and positive otherwise
+            negative_indices = tf.where(tf.less(tf.gather(tensor_flatten, mapping), 0))
+            Kneg = tf.size(negative_indices) ; Kpos = K-Kneg
+            mask = tf.tensor_scatter_nd_update(tf.ones([K], dtype=tf.int32), negative_indices, -tf.ones(Kneg, dtype=tf.int32))
+            mapping = (mapping + 1) * mask
+
+            # Fitting the curve of Negatives
+            Xneg = tf.cast(tf.range(1, Kneg + 1), tf.float64)
+            neg_coefficients = Values_Approximation_Helper.double_exponential_fit(Xneg, tf.cast(tf.gather(values, tf.range(0, Kneg)), tf.float64), Kneg)
+            neg_num_of_coefficients = len(neg_coefficients)
+            neg_coefficients = tf.reshape(neg_coefficients, [-1])
+
+            # Fitting the curve of Positives
+            Xpos = tf.cast(tf.range(1, Kpos + 1), tf.float64)
+            pos_coefficients = Values_Approximation_Helper.double_exponential_fit(Xpos, tf.cast(tf.gather(values, tf.range(K-Kpos, K)), tf.float64), Kpos)
+            pos_num_of_coefficients = len(pos_coefficients)
+            pos_coefficients = tf.reshape(pos_coefficients, [-1])
+
+            ##################### Logging #####################
+            coefficients = tf.concat([neg_coefficients, pos_coefficients], 0)
+            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            library = load_library.load_op_library(filename)
+            logger = library.logger
+            logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
+                            bloom_logs_path=params['bloom_logs_path'],
+                            gradient_id=params['gradient_id'],
+                            verbosity_frequency=params['bloom_verbosity_frequency'],
+                            verbosity=params['bloom_verbosity'],
+                            rank=rank())
+            ##################### /Logging #####################
+
+            compressed_indices = mapping  # Possible indices compression here
+            with tf.control_dependencies([logger]):
+                compressed_indices = tf.cast(compressed_indices, tf.float64)
+                tensor_compressed = tf.concat([coefficients, compressed_indices], 0)
+                params['message_size'] = neg_num_of_coefficients + pos_num_of_coefficients
+                params['Xneg'] = Xneg
+                params['Xpos'] = Xpos
+
+        # No approximation
+        else:
+            _, mapping = tf.math.top_k(abs_values, K, sorted=False)
+            values = tf.gather(tensor_flatten, mapping)
+            compressed_indices = mapping  # Possible indices compression here
+            compressed_indices = tf.cast(compressed_indices, tf.float32)
+            tensor_compressed = tf.concat([values, compressed_indices], 0)
+            params['message_size'] = K
+
+        ctx = tensor_shape
+        params['tensors_size_are_same'] = True
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+        tensor_shape = ctx
+        tensor_compressed_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
+        message, indices = tf.split(tensor_compressed, [params['message_size'], tensor_compressed_size-params['message_size']])
+        decompressed_indices = tf.cast(indices, tf.int32)
+
+        if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
+            negative_indices = tf.where(tf.less(decompressed_indices, 0))
+            decompressed_indices = tf.math.abs(decompressed_indices)
+            decompressed_indices = decompressed_indices - 1
+
+            message_neg, message_pos = tf.split(message, 2)
+
+            y_estimates_neg = message_neg[0] * tf.math.exp(message_neg[2] * params['Xneg']) + \
+                          message_neg[1] * tf.math.exp(message_neg[3] * params['Xneg'])
+
+            y_estimates_pos = message_pos[0] * tf.math.exp(message_pos[2] * params['Xpos']) + \
+                              message_pos[1] * tf.math.exp(message_pos[3] * params['Xpos'])
+
+            y_estimates = tf.concat([y_estimates_neg, y_estimates_pos], 0)
+
+            Kneg = tf.size(negative_indices)
+            mask = tf.tensor_scatter_nd_update(tf.ones([params['K']], dtype=tf.int32), negative_indices, -tf.ones(Kneg, dtype=tf.int32))
+            y_estimates = y_estimates * tf.cast(mask, tf.float64)
+            values = tf.cast(tf.reshape(y_estimates, [-1]), tf.float32)
+        else:
+            values = message
+
+        decompressed_indices = tf.expand_dims(decompressed_indices, 1)
+        tensor_decompressed = tf.scatter_nd(decompressed_indices, values, [params['N']])
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+
+        return tensor_decompressed
+
 
 class Values_Approximation_Logit_Compressor(Compressor):
-
 
     @staticmethod
     def compress(tensor, params):
@@ -2092,3 +2325,5 @@ class Compression(object):
     values_approximation = Values_Approximation_Compressor
     values_approximation_logit = Values_Approximation_Logit_Compressor
     topk_values_approximation = TopK_Values_Approximation_Compressor
+    two_topk_values_approximation = Two_TopK_Values_Approximation_Compressor
+    polynomial_segmented_values_approximation = Polynomial_Segmented_Values_Approximation_Compressor

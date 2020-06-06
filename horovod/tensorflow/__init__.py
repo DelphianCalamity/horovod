@@ -88,8 +88,9 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'bloom_verbosity': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY', 0)),
         'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
         'encoding': os.environ.get('HOROVOD_BITSTREAM_ENCODING', None),
-        'code': os.environ.get('HOROVOD_BITSTREAM_CODE', None)
-
+        'code': os.environ.get('HOROVOD_BITSTREAM_CODE', None),
+        'num_of_segments': os.environ.get('HOROVOD_SEGMENTS', None),
+        'polynomial_degree': os.environ.get('HOROVOD_POLYNOMIAL_DEGREE', None)
     }
     if params is not None:
         for argument in params_env:
@@ -125,13 +126,15 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict["values_approximation"] = Compression.values_approximation
     comp_dict["values_approximation_logit"] = Compression.values_approximation_logit
     comp_dict["topk_values_approximation"] = Compression.topk_values_approximation
-
+    comp_dict["two_topk_values_approximation"] = Compression.two_topk_values_approximation
+    comp_dict['polynomial_segmented_values_approximation'] = Compression.polynomial_segmented_values_approximation
 
     # testing
     if not params['compress_state']:
         for method in ['randomk', 'topk', 'threshold', 'terngrad', 'qsgd', 'dgc', 'adaq',
                        'signsgd', 'efsignsgd', 'signum', 'adas', 'onebit', 'powersgd', '8bit', 'natural', 'sketch',
-                       'bloom', 'values_approximation', 'values_approximation_logit', 'topk_values_approximation']:
+                       'bloom', 'values_approximation', 'values_approximation_logit', 'topk_values_approximation',
+                       'two_topk_values_approximation', 'polynomial_segmented_values_approximation']:
             comp_dict[method] = Compression.fake
 
     default_params = {}
