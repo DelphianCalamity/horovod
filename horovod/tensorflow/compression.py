@@ -478,14 +478,31 @@ class Values_Approximation_Helper(Compressor):
         break_points = tf.zeros(num_of_segments + 1, tf.int32)
         for i in range(num_of_segments - 1):
             a = tf.math.argmax(tf.abs(tf.linspace(y[0], y[-1], tf.size(y)) - y))
-            b = b + tf.cast(a, tf.int32) #tf.math.argmax(tf.abs(tf.linspace(y[0], y[-1], tf.size(y)) - y))
+            b = b + tf.cast(a, tf.int32)
             break_points = tf.tensor_scatter_nd_update(break_points, [[i + 1]], b)
             y = tf.gather(y_train, tf.range(b[0], N[0]))
         break_points = tf.tensor_scatter_nd_update(break_points, [[num_of_segments]], N)
         sizes = [break_points[i + 1] - break_points[i] for i in range(num_of_segments)]
-        # print(break_points)
-        # print(sizes)
         return break_points, sizes
+
+    @staticmethod
+    def get_breaks(model, N):
+        if model == "resnet20_v2":
+            breaks = {2304:3, 4608:3, 9216:3, 18432:3, 36864:3} #432
+        elif model == "vgg16":
+            breaks = {
+                1728 : [0, 1443, 1663, 1728],
+                36864 : [0, 34097, 36467, 36815, 36864],
+                73728 : [0, 67595, 73032, 73630, 73728],
+                147456 : [0, 132193, 145286, 147125, 147456],
+                294912 : [0, 272485, 292623, 294580, 294844, 294912],
+                589824 : [0, 553577, 586620, 589431, 589764, 589824],
+                1179648 : [0, 1099105, 1172811, 1179005, 1179543, 1179648],
+                2359296 : [0, 2195844, 2343594, 2357633, 2359102, 2359296]}
+        elif model == "resnet50":
+            breaks = {16384, 36864, 131072, 32768, 147456, 65536, 524288,
+                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048}   #4096 #9408
+        return breaks[N]
 
     @staticmethod
     def GetInputMatrix(x, p0, N):
@@ -520,6 +537,16 @@ class Values_Approximation_Helper(Compressor):
             return True
         return False
 
+    @staticmethod
+    def get_num_of_segments(model, N):
+        if model == "resnet20_v2":
+            segments = {2304:3, 4608:3, 9216:3, 18432:3, 36864:3} #432
+        elif model == "vgg16":
+            segments = {1728:3, 36864:4, 73728:4, 147456:4, 294912:5, 589824:5, 1179648:5, 2359296:5}
+        elif model == "resnet50":
+            segments = {16384, 36864, 131072, 32768, 147456, 65536, 524288,
+                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048}   #4096 #9408
+        return segments[N]
 
 class Values_Approximation_Compressor(Compressor):
 
@@ -610,9 +637,9 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
         N = tensor_flatten.get_shape().as_list()[0]
         params['N'] = int(N)
         print("Tensor", tensor, "size:", params['N'])
+        params['scale'] = 1
 
         if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
-
             abs_values = tf.math.abs(tensor_flatten)
             mapping = tf.argsort(abs_values, axis=0, direction='ASCENDING')
             values = tf.gather(abs_values, mapping)
@@ -624,12 +651,16 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
             mapping = (mapping + 1) * mask
 
             # Fitting the curve segments
-            break_points, sizes = Values_Approximation_Helper.find_breaks(values, params['num_of_segments'], N)
+            params['num_of_segments'] = Values_Approximation_Helper.get_num_of_segments(params['model_name'], params['N'])
+            # break_points, sizes = Values_Approximation_Helper.find_breaks(values, params['num_of_segments'], N)
+            break_points = Values_Approximation_Helper.get_breaks(params['model_name'], N)
+            sizes = [break_points[i+1]-break_points[i] for i in range(params['num_of_segments'])]
+
             coefficients = []
             for i in range(params['num_of_segments']):
-                x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.int64), [1, sizes[i]])
+                x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.float64), [1, sizes[i]])
                 X = Values_Approximation_Helper.GetInputMatrix_Polynomial(params['polynomial_degree'], x)
-                y = tf.reshape(values[break_points[i]: break_points[i + 1]], [sizes[i], 1])
+                y = tf.reshape(values[break_points[i]: break_points[i+1]]*params['scale'], [sizes[i], 1])
                 coefficients += [Values_Approximation_Helper.LeastSquares(X, tf.cast(y, tf.float64))]
             coefficients = tf.convert_to_tensor(coefficients)
             coefficients = tf.reshape(coefficients, [-1])
@@ -678,9 +709,9 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
                                                -tf.ones(Nneg, dtype=tf.int32))
             y_segments = []
             for i in range(params['num_of_segments']):
-                x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.int64), [1, sizes[i]])
+                x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.float64), [1, sizes[i]])
                 X = Values_Approximation_Helper.GetInputMatrix_Polynomial(params['polynomial_degree'], x)
-                y_segments += [tf.matmul(X, tf.reshape(coefficients[i], [params['polynomial_degree'], 1]))]
+                y_segments += [tf.matmul(X, tf.reshape(coefficients[i], [params['polynomial_degree'], 1]))/params['scale']]
             values = tf.reshape(tf.concat(y_segments, axis=0), [params['N']])
             values = values * tf.cast(mask, tf.float64)
             decompressed_indices = tf.expand_dims(decompressed_indices, 1)
