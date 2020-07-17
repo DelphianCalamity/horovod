@@ -99,45 +99,9 @@ class FP16Compressor(Compressor):
             tensor_decompressed = tf.cast(tensor, dtype=dtype)
         return tensor_decompressed
 
+class SparsifierCompressor(Compressor):
 
-class RandomkCompressor(Compressor):
     global_step = 0
-
-    @staticmethod
-    def compress(tensor, params):
-        """Use Python Random libraries RNG to compress by generating a list of indices to be transmitted."""
-
-        tensor_shape = tf.shape(tensor)
-        tensor_flatten = tf.reshape(tensor, [-1])
-        elemnum = tensor_flatten.get_shape().as_list()[0]
-        compress_ratio = params["compress_ratio"]
-        all_indices = tf.range(elemnum, dtype=tf.int32)
-        h = hash(tensor.name) + RandomkCompressor.global_step
-        tf.compat.v1.set_random_seed(1)
-        indices = tf.random.shuffle(all_indices, seed=h)[:max(1, int(elemnum * compress_ratio))]
-        RandomkCompressor.global_step += 1
-        values = tf.gather(tensor_flatten, indices)
-        ctx = indices, tensor_shape, tensor_flatten
-        tensor_compressed = values
-        params['tensors_size_are_same'] = True
-
-        return tensor_compressed, ctx
-
-    @staticmethod
-    def decompress(tensor_compressed, ctx, params):
-        """Decompress by filling empty slots with zeros and reshape back using the original shape"""
-        indices, tensor_shape, tensor_flatten = ctx
-        values = tensor_compressed
-        tensor_size = tf.math.reduce_prod(tensor_shape)
-        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
-        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
-        with tf.control_dependencies([op]):
-            tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
-        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
-        return tensor_decompressed
-
-
-class TopKCompressor(Compressor):
 
     @staticmethod
     def compress(tensor, params):
@@ -147,15 +111,39 @@ class TopKCompressor(Compressor):
         compress_ratio = params["compress_ratio"]
 
         k = max(1, int(elemnum * compress_ratio))
-        params['topk_k'] = k
+        params['K'] = k
         params['values_size'] = k
 
-        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
-        indices = tf.sort(indices, axis=0, direction='ASCENDING')
-        values = tf.gather(tensor_flatten, indices)
+        ################################################################################
+        if params["compress_method"] == "topk":
+            _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
+            indices = tf.sort(indices, axis=0, direction='ASCENDING')
+            values = tf.gather(tensor_flatten, indices)
+
+        elif params["compress_method"] == "randomk":
+            # all_indices = tf.range(elemnum, dtype=tf.int32)
+            # indices = tf.random.shuffle(all_indices, seed=None)[:k]
+            # indices = tf.sort(indices, axis=0, direction='ASCENDING')
+
+            all_indices = tf.range(elemnum, dtype=tf.int32)
+            h = hash(tensor.name) + RandomkCompressor.global_step
+            tf.compat.v1.set_random_seed(1)
+            indices = tf.random.shuffle(all_indices, seed=h)[:k]
+            indices = tf.sort(indices, axis=0, direction='ASCENDING')
+            RandomkCompressor.global_step += 1
+            values = tf.gather(tensor_flatten, indices)
+
+        # elif params["compress_method"] == "threshold":
+        #     threshold_val = params["threshold_val"]
+        #     thr_mask = tf.math.greater_equal(tf.math.abs(tensor_flatten), threshold_val)
+        #     values = tf.boolean_mask(tensor_flatten, thr_mask)
+        #     indices = tf.reshape(tf.where(thr_mask), [-1])
+        #     params['K'] = k
+        #     params['values_size'] =  k
+        ################################################################################
 
         if params['encoding'] is not None:
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
 
             if params['encoding'] == "integer_compression":
@@ -230,7 +218,188 @@ class TopKCompressor(Compressor):
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
         if params['encoding'] is not None:
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
+            library = load_library.load_op_library(filename)
+
+            if params['encoding'] == "integer_compression":
+                integer_decompressor = library.integer_decompressor
+                indices = tf.bitcast(indices, tf.uint32)
+                decompressed_indices = integer_decompressor(indices, params['K'],
+                                                            tf.train.get_or_create_global_step(),
+                                                            logs_path=params['bloom_logs_path'],
+                                                            gradient_id=params['gradient_id'],
+                                                            verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                            verbosity=params['bloom_verbosity'],
+                                                            suffix=params['suffix'],
+                                                            rank=rank(),
+                                                            code=params['code'])
+
+                decompressed_indices = tf.bitcast(decompressed_indices, tf.int32)
+
+            elif params['encoding'] == "rle_compression":
+                if params['code'] == "0_8":
+                    rle_decompressor = library.rle_decompressor_v0_code8
+                # elif params['code'] == "1_8":
+                #     rle_decompressor = library.rle_decompressor_v1_code8
+                # elif params['code'] == "0_32":
+                #     rle_decompressor = library.rle_decompressor_v0_code32
+                # elif params['code'] == "1_32":
+                #     rle_decompressor = library.rle_decompressor_v1_code32
+
+                decompressed_indices = rle_decompressor(indices, params['K'],
+                                                        tf.train.get_or_create_global_step(),
+                                                        logs_path=params['bloom_logs_path'],
+                                                        gradient_id=params['gradient_id'],
+                                                        verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                        verbosity=params['bloom_verbosity'],
+                                                        suffix=params['suffix'],
+                                                        rank=rank())
+        else:
+            decompressed_indices = indices
+
+        decompressed_indices = tf.expand_dims(decompressed_indices, 1)
+        tensor_decompressed = tf.scatter_nd(decompressed_indices, values, [tensor_size])
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+
+        # zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
+        # op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        # with tf.control_dependencies([op]):
+        #     tensor_decompressed = tf.scatter_update(zero_tensor, decompressed_indices, values)
+        # tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
+
+
+
+class RandomkCompressor(Compressor):
+    global_step = 0
+
+    @staticmethod
+    def compress(tensor, params):
+        """Use Python Random libraries RNG to compress by generating a list of indices to be transmitted."""
+
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
+        all_indices = tf.range(elemnum, dtype=tf.int32)
+        h = hash(tensor.name) + RandomkCompressor.global_step
+        tf.compat.v1.set_random_seed(1)
+        indices = tf.random.shuffle(all_indices, seed=h)[:max(1, int(elemnum * compress_ratio))]
+        RandomkCompressor.global_step += 1
+        values = tf.gather(tensor_flatten, indices)
+        ctx = indices, tensor_shape, tensor_flatten
+        tensor_compressed = values
+        params['tensors_size_are_same'] = True
+
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+        """Decompress by filling empty slots with zeros and reshape back using the original shape"""
+        indices, tensor_shape, tensor_flatten = ctx
+        values = tensor_compressed
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+        zero_tensor = tf.Variable(tf.zeros([tensor_size], dtype=tf.float32), trainable=False)
+        op = zero_tensor.assign(tf.zeros([tensor_size], dtype=tf.float32))
+        with tf.control_dependencies([op]):
+            tensor_decompressed = tf.scatter_update(zero_tensor, indices, values)
+        tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
+        return tensor_decompressed
+
+class TopKCompressor(Compressor):
+
+    @staticmethod
+    def compress(tensor, params):
+        tensor_shape = tf.shape(tensor)
+        tensor_flatten = tf.reshape(tensor, [-1])
+        elemnum = tensor_flatten.get_shape().as_list()[0]
+        compress_ratio = params["compress_ratio"]
+
+        k = max(1, int(elemnum * compress_ratio))
+        params['topk_k'] = k
+        params['values_size'] = k
+
+        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
+        indices = tf.sort(indices, axis=0, direction='ASCENDING')
+        values = tf.gather(tensor_flatten, indices)
+
+        if params['encoding'] is not None:
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
+            library = load_library.load_op_library(filename)
+
+            if params['encoding'] == "integer_compression":
+                integer_compressor = library.integer_compressor
+
+                values = tf.bitcast(values, tf.int32)
+                values_shape = tf.shape(values)
+                indices = tf.bitcast(indices, tf.uint32)
+                compressed_indices = integer_compressor(indices,
+                                                        tf.train.get_or_create_global_step(),
+                                                        logs_path=params['bloom_logs_path'],
+                                                        gradient_id=params['gradient_id'],
+                                                        verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                        verbosity=params['bloom_verbosity'],
+                                                        rank=rank(),
+                                                        code=params['code'])
+                compressed_indices = tf.bitcast(compressed_indices, tf.int32)
+
+            elif params['encoding'] == "rle_compression":
+                if params['code'] == "0_8":
+                    rle_compressor = library.rle_compressor_v0_code8
+                    values = tf.bitcast(values, tf.uint8)
+                    values_shape = tf.shape(values)
+                    values = tf.reshape(values, [-1])
+                    params['values_size'] = k*4
+
+                # elif params['code'] == "1_8":
+                #     rle_compressor = library.rle_compressor_v1_code8
+                #     values = tf.bitcast(values, tf.uint8)
+                #     values_shape = tf.shape(values)
+                #     values = tf.reshape(values, [-1])
+                #     params['values_size'] = k*4
+                #
+                # elif params['code'] == "0_32":
+                #     rle_compressor = library.rle_compressor_v0_code32
+                #     values = tf.bitcast(values, tf.int32)
+                #     params['values_size'] = k
+                #
+                # elif params['code'] == "1_32":
+                #     rle_compressor = library.rle_compressor_v1_code32
+                #     values = tf.bitcast(values, tf.int32)
+                #     params['values_size'] = k
+
+                compressed_indices = rle_compressor(indices, elemnum,
+                                                    tf.train.get_or_create_global_step(),
+                                                    logs_path=params['bloom_logs_path'],
+                                                    gradient_id=params['gradient_id'],
+                                                    verbosity_frequency=params['bloom_verbosity_frequency'],
+                                                    verbosity=params['bloom_verbosity'],
+                                                    rank=rank())
+            params['tensors_size_are_same'] = False
+
+        else:
+            compressed_indices = indices
+            values = tf.bitcast(values, tf.int32)
+            params['values_size'] = k
+            values_shape = tf.shape(values)
+            params['tensors_size_are_same'] = True
+
+        tensor_compressed = tf.concat([values, compressed_indices], 0)
+        ctx = [tensor_shape, values_shape]
+        return tensor_compressed, ctx
+
+    @staticmethod
+    def decompress(tensor_compressed, ctx, params):
+        """Decompress by filling empty slots with zeros and reshape back using the original shape"""
+        compressed_tensor_size = tf.math.reduce_prod(tf.shape(tensor_compressed))
+        values, indices = tf.split(tensor_compressed, [params['values_size'], compressed_tensor_size-params['values_size']])
+        values = tf.reshape(values, ctx[1])
+        values = tf.bitcast(values, tf.float32)
+        tensor_shape = ctx[0]
+        tensor_size = tf.math.reduce_prod(tensor_shape)
+
+        if params['encoding'] is not None:
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
 
             if params['encoding'] == "integer_compression":
@@ -297,6 +466,22 @@ class Bloom_Filter_Compressor(Compressor):
         return m, h
 
     @staticmethod
+    def topk_indices(tensor, K):
+        _, indices = tf.math.top_k(tf.math.abs(tensor), K, sorted=False)
+        indices = tf.sort(indices, axis=0, direction='ASCENDING')
+        return indices
+
+    @staticmethod
+    def randomk_indices(tensor_name, N, K):
+        all_indices = tf.range(N, dtype=tf.int32)
+        h = hash(tensor_name) + RandomkCompressor.global_step
+        tf.compat.v1.set_random_seed(1)
+        indices = tf.random.shuffle(all_indices, seed=h)[:K]
+        indices = tf.sort(indices, axis=0, direction='ASCENDING')
+        RandomkCompressor.global_step += 1
+        return indices
+
+    @staticmethod
     def compress(tensor, params):
 
         tensor_shape = tf.shape(tensor)
@@ -314,13 +499,15 @@ class Bloom_Filter_Compressor(Compressor):
         params["bloom_config"].add_data(k, params['m']*8, params['k'], params["bloom_fpr"])
         params["throughput_info"].add_data(elemnum, elemnum/8,  params['m']*8, (params['m']*8)/8, elemnum-params['m']*8, (elemnum-params['m']*8)/8)
 
-        # Topk Sparcification Method
-        _, indices = tf.math.top_k(tf.math.abs(tensor_flatten), k, sorted=False)
-        indices = tf.sort(indices, axis=0, direction='ASCENDING')
+        if params['bloom_on'] == "topk":            # Topk Sparsification Method
+            indices = Bloom_Filter_Compressor.topk_indices(tensor_flatten, k)
+        elif params['bloom_on'] == "randomk":       # Randomk Sparsification Method
+            indices = Bloom_Filter_Compressor.randomk_indices(tensor.name, elemnum, k)
+
         values = tf.gather(tensor_flatten, indices)
         values = tf.bitcast(values, tf.int32)
 
-        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
         library = load_library.load_op_library(filename)
         bloom_compressor = library.bloom_compressor
 
@@ -345,7 +532,7 @@ class Bloom_Filter_Compressor(Compressor):
         tensor_shape = ctx
         tensor_size = tf.math.reduce_prod(tensor_shape)
 
-        filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+        filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
         library = load_library.load_op_library(filename)
         bloom_decompressor = library.bloom_decompressor
 
@@ -488,7 +675,13 @@ class Values_Approximation_Helper(Compressor):
     @staticmethod
     def get_breaks(model, N):
         if model == "resnet20_v2":
-            breaks = {2304:3, 4608:3, 9216:3, 18432:3, 36864:3} #432
+            breaks = {
+                432 : [0, 353, 432],
+                2304 : [0, 1847, 2229, 2304],
+                4608 : [0, 4073, 4544, 4608],
+                9216 : [0, 8164, 9012, 9216],
+                18432 : [0, 16094, 18060, 18432],
+                36864 : [0, 33742, 36595, 36864]}
         elif model == "vgg16":
             breaks = {
                 1728 : [0, 1443, 1663, 1728],
@@ -500,8 +693,22 @@ class Values_Approximation_Helper(Compressor):
                 1179648 : [0, 1099105, 1172811, 1179005, 1179543, 1179648],
                 2359296 : [0, 2195844, 2343594, 2357633, 2359102, 2359296]}
         elif model == "resnet50":
-            breaks = {16384, 36864, 131072, 32768, 147456, 65536, 524288,
-                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048}   #4096 #9408
+            breaks = {
+                4096 : [0, 3656, 4018, 4096],
+                9408 : [0, 8476, 9165, 9408],
+                16384 : [0, 14406, 16145, 16327, 16384],
+                36864 : [0, 32238, 36292, 36726, 36864],
+                131072 : [0, 121069, 130381, 130989, 131072],
+                32768 : [0, 29429, 32320, 32692, 32768],
+                147456 : [0, 133258, 145944, 147255, 147456],
+                65536 : [0, 58690, 64507, 65371, 65536],
+                524288 : [0, 494762, 522078, 524067, 524238, 524288],
+                589824 : [0, 539407, 584654, 589214, 589738, 589824],
+                262144 : [0, 237433, 259437, 261782, 262062, 262144],
+                2097152 : [0, 1990620, 2088919, 2096322, 2097036, 2097152],
+                2359296 : [0, 2188168, 2341896, 2356580, 2358793, 2359296],
+                1048576 : [0, 981145, 1041707, 1047784, 1048461, 1048576],
+                2050048 : [0, 1980923, 2044274, 2049225, 2049929, 2050048]}
         return breaks[N]
 
     @staticmethod
@@ -526,13 +733,12 @@ class Values_Approximation_Helper(Compressor):
     def is_convolutional(model, N):
         print(model)
         if model == "resnet20_v2":
-            conv_sizes = [2304, 4608, 9216, 18432, 36864] #432
+            conv_sizes = [432, 2304, 4608, 9216, 18432, 36864]
         elif model == "vgg16":
             conv_sizes = [1728, 36864, 73728, 147456, 294912, 589824, 1179648, 2359296]
         elif model == "resnet50":
-            conv_sizes = [16384, 36864, 131072, 32768, 147456, 65536, 524288,
-                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048]   #4096 #9408
-
+            conv_sizes = [4096, 9408, 16384, 36864, 131072, 32768, 147456, 65536, 524288,
+                          589824, 262144, 2097152, 2359296, 1048576, 2050048]
         if N in conv_sizes:
             return True
         return False
@@ -540,12 +746,12 @@ class Values_Approximation_Helper(Compressor):
     @staticmethod
     def get_num_of_segments(model, N):
         if model == "resnet20_v2":
-            segments = {2304:3, 4608:3, 9216:3, 18432:3, 36864:3} #432
+            segments = {432:2, 2304:3, 4608:3, 9216:3, 18432:3, 36864:3}
         elif model == "vgg16":
             segments = {1728:3, 36864:4, 73728:4, 147456:4, 294912:5, 589824:5, 1179648:5, 2359296:5}
         elif model == "resnet50":
-            segments = {16384, 36864, 131072, 32768, 147456, 65536, 524288,
-                          589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048}   #4096 #9408
+            segments = {  4096:3, 9408:3, 16384:4, 36864:4, 131072:4, 32768:4, 147456:4, 65536:4, 524288:5,
+                          589824:5, 262144:5, 2097152:5, 2359296:5, 1048576:5, 2050048:5}
         return segments[N]
 
 class Values_Approximation_Compressor(Compressor):
@@ -576,7 +782,7 @@ class Values_Approximation_Compressor(Compressor):
             num_of_coefficients = len(coefficients)     # coefficients = tf.cast(coefficients, tf.float32)
 
             ##################### Logging #####################
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
             logger = library.logger
             logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
@@ -635,38 +841,52 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
         tensor_shape = tf.shape(tensor)
         tensor_flatten = tf.reshape(tensor, [-1])
         N = tensor_flatten.get_shape().as_list()[0]
-        params['N'] = int(N)
+        compress_ratio = params["compress_ratio"]
+        params['N'] = params['K'] = int(N)
+
         print("Tensor", tensor, "size:", params['N'])
-        params['scale'] = 1
 
         if Values_Approximation_Helper.is_convolutional(params['model_name'], params['N']):
+
             abs_values = tf.math.abs(tensor_flatten)
-            mapping = tf.argsort(abs_values, axis=0, direction='ASCENDING')
-            values = tf.gather(abs_values, mapping)
+
+            if params['approximation_mode'] == "topk":
+                K = max(1, int(N * compress_ratio))
+                params['K'] = K
+                top_values, mapping = tf.math.top_k(abs_values, K, sorted=False)
+                sorted_mapping = tf.argsort(top_values, axis=0, direction='ASCENDING')
+                values = tf.gather(top_values, sorted_mapping)
+                mapping = tf.gather(mapping, sorted_mapping)
+            else:
+                mapping = tf.argsort(abs_values, axis=0, direction='ASCENDING')
+                values = tf.gather(abs_values, mapping)
+
             # Indices have a negative sign if they correspond to negative values and positive otherwise
             negative_indices = tf.where(tf.less(tf.gather(tensor_flatten, mapping), 0))
             Nneg = tf.size(negative_indices)
-            mask = tf.tensor_scatter_nd_update(tf.ones([N], dtype=tf.int32), negative_indices,
+            mask = tf.tensor_scatter_nd_update(tf.ones([params['K']], dtype=tf.int32), negative_indices,
                                                -tf.ones(Nneg, dtype=tf.int32))
             mapping = (mapping + 1) * mask
 
             # Fitting the curve segments
             params['num_of_segments'] = Values_Approximation_Helper.get_num_of_segments(params['model_name'], params['N'])
-            # break_points, sizes = Values_Approximation_Helper.find_breaks(values, params['num_of_segments'], N)
-            break_points = Values_Approximation_Helper.get_breaks(params['model_name'], N)
-            sizes = [break_points[i+1]-break_points[i] for i in range(params['num_of_segments'])]
+            break_points, sizes = Values_Approximation_Helper.find_breaks(values, params['num_of_segments'], params['K'])
+            # break_points = Values_Approximation_Helper.get_breaks(params['model_name'], N)
+            # sizes = [break_points[i+1]-break_points[i] for i in range(params['num_of_segments'])]
 
+            # params['X'] = {}
             coefficients = []
             for i in range(params['num_of_segments']):
                 x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.float64), [1, sizes[i]])
                 X = Values_Approximation_Helper.GetInputMatrix_Polynomial(params['polynomial_degree'], x)
-                y = tf.reshape(values[break_points[i]: break_points[i+1]]*params['scale'], [sizes[i], 1])
+                y = tf.reshape(values[break_points[i]: break_points[i+1]], [sizes[i], 1])
                 coefficients += [Values_Approximation_Helper.LeastSquares(X, tf.cast(y, tf.float64))]
+                # params['X'][i] = X
             coefficients = tf.convert_to_tensor(coefficients)
             coefficients = tf.reshape(coefficients, [-1])
 
             ##################### Logging #####################
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
             logger = library.logger
             logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
@@ -682,6 +902,7 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
                 sizes = tf.cast(sizes, tf.float64)
                 compressed_indices = tf.cast(compressed_indices, tf.float64)
                 tensor_compressed = tf.concat([sizes, coefficients, compressed_indices], 0)
+                # tensor_compressed = tf.concat([coefficients, compressed_indices], 0)
         else:
             tensor_compressed = tensor
 
@@ -698,6 +919,9 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
                                                                         params['polynomial_degree'] * params[
                                                                             'num_of_segments'],
                                                                         params['N']])
+            # coefficients, indices = tf.split(tensor_compressed, [params['polynomial_degree'] *
+            #                                                             params['num_of_segments'],
+            #                                                             params['N']])
             coefficients = tf.reshape(coefficients, [params['num_of_segments'], params['polynomial_degree']])
             decompressed_indices = tf.cast(indices, tf.int32)
             sizes = tf.cast(sizes, tf.int32)
@@ -705,15 +929,17 @@ class Polynomial_Segmented_Values_Approximation_Compressor(Compressor):
             decompressed_indices = tf.math.abs(decompressed_indices)
             decompressed_indices = decompressed_indices - 1
             Nneg = tf.size(negative_indices)
-            mask = tf.tensor_scatter_nd_update(tf.ones([params['N']], dtype=tf.int32), negative_indices,
+            mask = tf.tensor_scatter_nd_update(tf.ones([params['K']], dtype=tf.int32), negative_indices,
                                                -tf.ones(Nneg, dtype=tf.int32))
             y_segments = []
             for i in range(params['num_of_segments']):
                 x = tf.reshape(tf.cast(tf.range(0, sizes[i]), tf.float64), [1, sizes[i]])
                 X = Values_Approximation_Helper.GetInputMatrix_Polynomial(params['polynomial_degree'], x)
-                y_segments += [tf.matmul(X, tf.reshape(coefficients[i], [params['polynomial_degree'], 1]))/params['scale']]
+                # X = params['X'][i]
+                y_segments += [tf.matmul(X, tf.reshape(coefficients[i], [params['polynomial_degree'], 1]))]
             values = tf.reshape(tf.concat(y_segments, axis=0), [params['N']])
             values = values * tf.cast(mask, tf.float64)
+
             decompressed_indices = tf.expand_dims(decompressed_indices, 1)
             tensor_decompressed = tf.scatter_nd(decompressed_indices, tf.cast(values, tf.float32), [params['N']])
             tensor_decompressed = tf.reshape(tensor_decompressed, tensor_shape)
@@ -756,7 +982,7 @@ class TopK_Values_Approximation_Compressor(Compressor):
             num_of_coefficients = len(coefficients)     # coefficients = tf.cast(coefficients, tf.float32)
 
             ##################### Logging #####################
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
             logger = library.logger
             logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
@@ -860,7 +1086,7 @@ class Two_TopK_Values_Approximation_Compressor(Compressor):
 
             ##################### Logging #####################
             coefficients = tf.concat([neg_coefficients, pos_coefficients], 0)
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
             logger = library.logger
             logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
@@ -954,7 +1180,7 @@ class Values_Approximation_Logit_Compressor(Compressor):
             coefficients = Values_Approximation_Helper.LeastSquares(X_train, tf.cast(values_sorted, tf.float64))
 
             ##################### Logging #####################
-            filename = resource_loader.get_path_to_datafile('mpi_lib.so')
+            filename = resource_loader.get_path_to_datafile('mpi_lib.cpython-36m-x86_64-linux-gnu.so')
             library = load_library.load_op_library(filename)
             logger = library.logger
             logger = logger(tensor_flatten, coefficients, tf.train.get_or_create_global_step(),
@@ -2353,6 +2579,7 @@ class Compression(object):
     sketch = SketchCompressor
     inceptionn = INCEPTIONNCompressor
     fake = FakeCompressor
+    sparsifier = SparsifierCompressor
     bloom = Bloom_Filter_Compressor
     values_approximation = Values_Approximation_Compressor
     values_approximation_logit = Values_Approximation_Logit_Compressor

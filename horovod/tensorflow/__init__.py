@@ -87,10 +87,13 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'bloom_verbosity_frequency': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY_FREQUENCY', 0)),
         'bloom_verbosity': int(os.environ.get('HOROVOD_BLOOM_VERBOSITY', 0)),
         'bloom_logs_path': os.environ.get('HOROVOD_BLOOM_LOGS_PATH', "./logs"),
+        'bloom_on': os.environ.get('HOROVOD_BLOOM_ON', "topk"),
         'encoding': os.environ.get('HOROVOD_BITSTREAM_ENCODING', None),
         'code': os.environ.get('HOROVOD_BITSTREAM_CODE', None),
-        'num_of_segments': int(os.environ.get('HOROVOD_SEGMENTS', None)),
-        'polynomial_degree': int(os.environ.get('HOROVOD_POLYNOMIAL_DEGREE', None))
+        'num_of_segments': int(os.environ.get('HOROVOD_SEGMENTS', 4)),
+        'polynomial_degree': int(os.environ.get('HOROVOD_POLYNOMIAL_DEGREE', 4))
+        'approximation_mode': os.environ.get('HOROVOD_APPROXIMATION_MODE', None)
+
     }
     if params is not None:
         for argument in params_env:
@@ -105,8 +108,8 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
     comp_dict = {}
     comp_dict["none"] = Compression.none
     comp_dict["fp16"] = Compression.fp16
-    comp_dict["randomk"] = Compression.randomk
-    comp_dict["topk"] = Compression.topk
+    comp_dict["randomk"] = Compression.sparsifier
+    comp_dict["topk"] = Compression.sparsifier
     comp_dict["threshold"] = Compression.threshold
     comp_dict["terngrad"] = Compression.terngrad
     comp_dict["qsgd"] = Compression.qsgd

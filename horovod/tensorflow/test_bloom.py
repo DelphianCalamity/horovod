@@ -32,7 +32,7 @@ hash_num = int(math.ceil(h))
 print("BLOOM:", bloom_size)
 print("HASHNUM:", hash_num)
 
-policy = "conflict_sets"
+policy = "leftmostK" #"conflict_sets"
 mem_mode=0
 step=tf.placeholder(tf.int64, name='step')
 compressed_tensor = bloom_compressor(values, indices,
