@@ -7,27 +7,16 @@ import pandas as pd
 import argparse
 import itertools
 
-def get_breaks(model, N):
-    if model == "resnet20_v2":
-        breaks = {2304:3, 4608:3, 9216:3, 18432:3, 36864:3} #432
-    elif model == "vgg16":
-        breaks = {
-            1728 : [0, 1443, 1663, 1728],
-            36864 : [0, 34097, 36467, 36815, 36864],
-            73728 : [0, 67595, 73032, 73630, 73728],
-            147456 : [0, 132193, 145286, 147125, 147456],
-            294912 : [0, 272485, 292623, 294580, 294844, 294912],
-            589824 : [0, 553577, 586620, 589431, 589764, 589824],
-            1179648 : [0, 1099105, 1172811, 1179005, 1179543, 1179648],
-            2359296 : [0, 2195844, 2343594, 2357633, 2359102, 2359296]}
-    elif model == "resnet50":
-        breaks = {16384, 36864, 131072, 32768, 147456, 65536, 524288,
-                      589824, 262144, 2097152, 524288, 2359296, 1048576, 2050048}   #4096 #9408
-    return breaks[N]
 
 def get_breaks(model, N):
     if model == "resnet20_v2":
-        breaks = {2304: 3, 4608: 3, 9216: 3, 18432: 3, 36864: 3}  # 432
+        breaks = {
+            432: [0, 353, 432],
+            2304: [0, 1847, 2229, 2304],
+            4608: [0, 4073, 4544, 4608],
+            9216: [0, 8164, 9012, 9216],
+            18432: [0, 16094, 18060, 18432],
+            36864: [0, 33742, 36595, 36864]}
     elif model == "vgg16":
         breaks = {
             1728: [0, 1443, 1663, 1728],
@@ -56,6 +45,20 @@ def get_breaks(model, N):
             1048576: [0, 981145, 1041707, 1047784, 1048461, 1048576],
             2050048: [0, 1980923, 2044274, 2049225, 2049929, 2050048]}
     return breaks[N]
+def find_breaks(curve, num_of_segments=2):
+    y=curve
+    breaks = []
+    break_index = 0
+    breaks.append(break_index)
+    for i in range(num_of_segments):
+        line = np.linspace(y[0], y[-1], len(y))
+        distance = list(np.abs(line - y))
+        break_index += distance.index(max(distance))
+        breaks.append(break_index)
+        y=curve[break_index:]
+    breaks.append(len(curve))
+    return breaks
+
 
 def get_num_of_segments(model, N):
     if model == "resnet20_v2":

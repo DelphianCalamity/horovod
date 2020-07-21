@@ -91,7 +91,7 @@ def allreduce(tensor, average=True, device_dense='', device_sparse='', compressi
         'encoding': os.environ.get('HOROVOD_BITSTREAM_ENCODING', None),
         'code': os.environ.get('HOROVOD_BITSTREAM_CODE', None),
         'num_of_segments': int(os.environ.get('HOROVOD_SEGMENTS', 4)),
-        'polynomial_degree': int(os.environ.get('HOROVOD_POLYNOMIAL_DEGREE', 4))
+        'polynomial_degree': int(os.environ.get('HOROVOD_POLYNOMIAL_DEGREE', 4)),
         'approximation_mode': os.environ.get('HOROVOD_APPROXIMATION_MODE', None)
 
     }
